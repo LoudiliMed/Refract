@@ -28,7 +28,7 @@ It's like asking someone to read the entire store catalogue just to buy bread.
 
 Fewer tokens sent = lower API bills, faster responses.
 
-**And nothing is lost.** Every check confirmed tools stay 100% usable after compression — no required information is ever stripped.
+**And nothing is lost.** Every check confirmed tools stay 100% usable after compression and no required information is ever stripped.
 
 ---
 
@@ -63,8 +63,34 @@ Open your Claude Desktop config file and add:
 }
 ```
 
-Replace the `--target` line with any MCP server you already use. Restart Claude Desktop — that's it, Refract runs in the background.
+Replace the `--target` line with any MCP server you already use. Restart Claude Desktop and that's it, Refract runs in the background.
 
+You may have this message when launching Claude Desktop :**"Failed to spawn process: No such file or directory" in Claude Desktop**
+
+This usually means Claude Desktop can't find `refract-proxy` in its PATH. Find the absolute path and use it directly in your config:
+
+```bash
+which refract-proxy
+```
+
+Then use the full path in `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "my-tool-via-refract": {
+      "command": "/full/path/to/refract-proxy",
+      "args": [
+        "--target",
+        "npx @modelcontextprotocol/server-filesystem /path/to/folder",
+        "--verbose"
+      ]
+    }
+  }
+}
+```
+
+---
 ### From the command line
 
 ```bash
