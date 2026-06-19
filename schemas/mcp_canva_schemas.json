@@ -1,0 +1,171 @@
+{
+  "canva": [
+    {
+      "name": "comment-on-design",
+      "description": "Add a comment on a Canva design. You need to provide the design ID and the message text. The comment will be added to the design and visible to all users with access to the design.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "design_id": {"description": "ID of the design to comment on. You can find the design ID by using the `search-designs` tool.", "maxLength": 11, "minLength": 11, "pattern": "^D[a-zA-Z0-9_-]+$", "type": "string"},
+          "message_plaintext": {"description": "The text content of the comment to add", "maxLength": 1000, "minLength": 1, "type": "string"},
+          "user_intent": {"description": "Mandatory description of what the user is trying to accomplish with this tool call.", "type": "string"}
+        },
+        "required": ["design_id", "message_plaintext"]
+      }
+    },
+    {
+      "name": "get-design",
+      "description": "Get detailed information about a Canva design, such as a doc, presentation, whiteboard, video, or sheet. This includes design owner information, title, URLs for editing and viewing, thumbnail, created/updated time, and page count. You must provide the design ID, which you can find by using the `search-designs` or `list-folder-items` tools.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "design_id": {"description": "ID of the design to get information for", "maxLength": 11, "minLength": 11, "pattern": "^D[a-zA-Z0-9_-]+$", "type": "string"},
+          "user_intent": {"description": "Mandatory description of what the user is trying to accomplish with this tool call.", "type": "string"}
+        },
+        "required": ["design_id"]
+      }
+    },
+    {
+      "name": "get-design-pages",
+      "description": "Get a list of pages in a Canva design, such as a presentation. Each page includes its index and thumbnail. You can use 'offset' and 'limit' to paginate through the pages.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "design_id": {"description": "The design ID to get pages from", "maxLength": 11, "minLength": 11, "pattern": "^D[a-zA-Z0-9_-]+$", "type": "string"},
+          "limit": {"description": "Maximum number of pages to return (for pagination)", "maximum": 100, "minimum": 1, "type": "integer"},
+          "offset": {"description": "The page index to start the range of pages to return, for pagination. The first page in a design has an index value of 1", "minimum": 1, "type": "integer"},
+          "user_intent": {"description": "Mandatory description of what the user is trying to accomplish with this tool call.", "type": "string"}
+        },
+        "required": ["design_id"]
+      }
+    },
+    {
+      "name": "list-comments",
+      "description": "Get a list of comments for a particular Canva design. Comments are discussions attached to designs that help teams collaborate. You need to provide the design ID, which you can find using the `search-designs` tool. Use the continuation token to get the next page of results, when there are more results.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "continuation": {"description": "Pagination token for the current search context. ONLY set this parameter if the previous response included a continuation token. If no continuation token was returned, OMIT this parameter completely. NEVER fabricate a token.", "type": "string"},
+          "design_id": {"description": "ID of the design to get comments for.", "maxLength": 11, "minLength": 11, "pattern": "^D[a-zA-Z0-9_-]+$", "type": "string"},
+          "limit": {"default": 50, "description": "Maximum number of comments to return (1-100). Defaults to 50 if not specified.", "maximum": 100, "minimum": 1, "type": "integer"},
+          "user_intent": {"description": "Mandatory description of what the user is trying to accomplish with this tool call.", "type": "string"}
+        },
+        "required": ["design_id"]
+      }
+    },
+    {
+      "name": "search-designs",
+      "description": "Search docs, presentations, videos, whiteboards, sheets, and other designs in Canva, except for templates or brand templates. Use when you need to find specific designs by keywords rather than browsing folders. Use 'query' parameter to search by title or content. If 'query' is used, 'sortBy' must be set to 'relevance'. Filter by 'any' ownership unless specified. ALWAYS use the 'search-brand-templates' tool when the user is searching for templates. This tool ONLY searches existing designs that the user already owns or that are shared with them.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "continuation": {"description": "Pagination token for the current search context. ONLY set this parameter if the previous response included a continuation token. If no continuation token was returned, OMIT this parameter completely. NEVER EVER fabricate a token.", "type": "string"},
+          "limit": {"description": "Maximum number of designs to return.", "exclusiveMinimum": 0, "type": "integer"},
+          "ownership": {"description": "Filter designs by ownership: 'any' for all designs owned by and shared with you (default), 'owned' for designs you created, 'shared' for designs shared with you", "enum": ["any", "owned", "shared"], "type": "string"},
+          "query": {"description": "Optional search term to filter designs by title or content. If it is used, 'sortBy' must be set to 'relevance'.", "type": "string"},
+          "sort_by": {"description": "Sort results by: 'relevance' (default), 'modified_descending', 'modified_ascending', 'title_descending', 'title_ascending'.", "enum": ["relevance", "modified_descending", "modified_ascending", "title_descending", "title_ascending"], "type": "string"},
+          "user_intent": {"description": "Mandatory description of what the user is trying to accomplish with this tool call.", "type": "string"}
+        }
+      }
+    },
+    {
+      "name": "search-folders",
+      "description": "Search the user's folders and folders shared with the user based on folder names and tags. Returns a list of matching folders with pagination support. Use the continuation token to get the next page of results, when there are more results.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "continuation": {"description": "Pagination token for the current search context. ONLY set this parameter if the previous response included a continuation token. If no continuation token was returned, OMIT this parameter completely. NEVER fabricate a token.", "type": "string"},
+          "limit": {"default": 5, "description": "Maximum number of folders to return per query", "maximum": 100, "minimum": 1, "type": "integer"},
+          "ownership": {"description": "Filter folders by ownership type: 'any' (default), 'owned' (user-owned only), or 'shared' (shared with user only)", "enum": ["any", "owned", "shared"], "type": "string"},
+          "query": {"description": "Search query to match against folder names and tags", "type": "string"},
+          "user_intent": {"description": "Mandatory description of what the user is trying to accomplish with this tool call.", "type": "string"}
+        }
+      }
+    },
+    {
+      "name": "copy-design",
+      "description": "Create a new Canva design by copying an existing design. Optionally select specific pages to include. Use the `search-designs` or `get-design` tools to find a design ID.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "design_id": {"description": "The ID of the source design to copy.", "type": "string"},
+          "page_numbers": {"description": "Optional 1-based page numbers to include in the copy. Omit to copy all pages.", "items": {"exclusiveMinimum": 0, "type": "integer"}, "minItems": 1, "type": "array"},
+          "user_intent": {"description": "Mandatory description of what the user is trying to accomplish with this tool call.", "type": "string"}
+        },
+        "required": ["design_id"]
+      }
+    },
+    {
+      "name": "create-design-from-brand-template",
+      "description": "Create a new Canva design from a brand template. Optionally select specific pages to include. If the user has already provided a brand template ID (a string starting with \"BTM\"), call this tool directly with that ID.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "brand_template_id": {"description": "The ID of the brand template to create a design from.", "type": "string"},
+          "page_numbers": {"description": "Optional 1-based page numbers to include from the brand template. Omit to use all pages.", "items": {"exclusiveMinimum": 0, "type": "integer"}, "minItems": 1, "type": "array"},
+          "user_intent": {"description": "Mandatory description of what the user is trying to accomplish with this tool call.", "type": "string"}
+        },
+        "required": ["brand_template_id"]
+      }
+    },
+    {
+      "name": "resize-design",
+      "description": "Resize a Canva design to a preset or custom size. The tool will provide a summary of the new resized design, including its metadata.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "design_id": {"description": "ID of the design to resize. Design ID starts with \"D\".", "maxLength": 11, "minLength": 11, "pattern": "^D[a-zA-Z0-9_-]+$", "type": "string"},
+          "design_type": {
+            "description": "Target design type (preset or custom). Preset options: presentation, whiteboard. Custom options: width and height in pixels.",
+            "anyOf": [
+              {"type": "object", "additionalProperties": false, "description": "Use this when resizing to a preset design type.", "properties": {"name": {"description": "The preset design type name.", "enum": ["presentation", "whiteboard"], "type": "string"}, "type": {"const": "preset", "type": "string"}}, "required": ["type", "name"]},
+              {"type": "object", "additionalProperties": false, "description": "Use this when resizing to custom dimensions.", "properties": {"height": {"description": "Height of the design in pixels. Must be at least 1.", "minimum": 1, "type": "number"}, "type": {"const": "custom", "type": "string"}, "width": {"description": "Width of the design in pixels. Must be at least 1.", "minimum": 1, "type": "number"}}, "required": ["type", "width", "height"]}
+            ]
+          },
+          "user_intent": {"description": "Mandatory description of what the user is trying to accomplish with this tool call.", "type": "string"}
+        },
+        "required": ["design_id", "design_type"]
+      }
+    },
+    {
+      "name": "export-design",
+      "description": "Export a Canva design, doc, presentation, whiteboard, videos and other Canva content types to various formats (PDF, JPG, PNG, PPTX, GIF, MP4, CSV). You should use the `get-export-formats` tool first to check which export formats are supported. This tool provides a download URL for the exported file.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "design_id": {"description": "ID of the design to export. Design ID starts with \"D\".", "maxLength": 11, "minLength": 11, "pattern": "^D[a-zA-Z0-9_-]+$", "type": "string"},
+          "format": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "Format options for the export",
+            "properties": {
+              "as_single_image": {"description": "Use for types: png. When true, multi-page designs are merged into a single image", "type": "boolean"},
+              "export_quality": {"description": "Use for types: pdf, png, jpg, gif, pptx, mp4. Export quality (regular or pro)", "enum": ["regular", "pro"], "type": "string"},
+              "height": {"description": "Use for types: png, jpg, gif. Height of the exported image in pixels", "maximum": 25000, "minimum": 40, "type": "number"},
+              "lossless": {"description": "Use for types: png. Whether to use lossless compression (default: true)", "type": "boolean"},
+              "pages": {"description": "Page numbers to export (1-based). If not specified, all pages will be exported.", "items": {"minimum": 1, "type": "number"}, "type": "array"},
+              "quality": {"anyOf": [{"description": "Use for types: jpg. Image quality from 1-100", "maximum": 100, "minimum": 1, "type": "number"}, {"description": "Required for types: mp4. Video quality (e.g., 'horizontal_1080p')", "type": "string"}]},
+              "size": {"description": "Use for types: pdf. Paper size for PDF export", "enum": ["a4", "a3", "letter", "legal"], "type": "string"},
+              "transparent_background": {"description": "Use for types: png. Whether to use a transparent background (default: false)", "type": "boolean"},
+              "type": {"description": "Format to export the design as.", "enum": ["pdf", "png", "jpg", "gif", "pptx", "mp4", "csv"], "type": "string"},
+              "width": {"description": "Use for types: png, jpg, gif. Width of the exported image in pixels", "maximum": 25000, "minimum": 40, "type": "number"}
+            },
+            "required": ["type"]
+          },
+          "user_intent": {"description": "Mandatory description of what the user is trying to accomplish with this tool call.", "type": "string"}
+        },
+        "required": ["design_id", "format"]
+      }
+    }
+  ]
+}

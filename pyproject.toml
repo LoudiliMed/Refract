@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "refract"
+version = "0.1.0"
+description = "MCP proxy that compresses tool schemas — up to -98% tokens, 100% signal preserved"
+readme = "README.md"
+license = {file = "LICENSE"}
+requires-python = ">=3.10"
+keywords = ["mcp", "llm", "proxy", "token-optimization", "claude", "anthropic"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "mcp>=1.0",
+    "fastapi>=0.100",
+    "uvicorn[standard]>=0.20",
+    "tiktoken>=0.5",
+    "httpx>=0.24",
+    "click",
+    "python-multipart>=0.0.6",
+]
+
+[project.scripts]
+refract-proxy = "refract_cli:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "httpx>=0.24",
+]
+
+# ─── hatchling : inclut uniquement les modules du package ────────────────────
+# src/ est la racine Python. On liste explicitement les fichiers à packager
+# pour ne pas inclure les scripts de benchmark/mesure (mcp_measure*.py, etc.).
+# ─── setuptools : modules plats dans src/ ────────────────────────────────────
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "strict"
+testpaths = ["tests"]

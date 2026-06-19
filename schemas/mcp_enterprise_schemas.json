@@ -1,0 +1,338 @@
+{
+  "calendar": [
+    {
+      "name": "create_event",
+      "description": "Creates a calendar event. Use this tool for queries like: * Create an event on my calendar for tomorrow at 2pm called 'Meeting with Jane'. * Schedule a meeting with john.doe@google.com next Monday from 10am to 11am. Example: create_event( summary='Meeting with Jane', startTime='2024-09-17T14:00:00', endTime='2024-09-17T15:00:00' ) # Creates an event on the primary calendar for September 17, 2024 from 2pm to 3pm called 'Meeting with Jane'.",
+      "inputSchema": {
+        "$defs": {
+          "Attachment": {
+            "description": "A file attachment for an event.",
+            "properties": {
+              "fileUrl": {"description": "Required. URL link to the attachment.", "type": "string"},
+              "title": {"description": "Optional. Attachment title. Optional.", "type": "string"}
+            },
+            "required": ["fileUrl"],
+            "type": "object"
+          },
+          "Attendee": {
+            "description": "An event attendee.",
+            "properties": {
+              "additionalGuests": {"description": "Optional. Number of additional guests. Optional. The default is 0.", "format": "int32", "type": "integer"},
+              "comment": {"description": "Output only. The attendee's response comment. Optional. Read-only.", "readOnly": true, "type": "string"},
+              "displayName": {"description": "Optional. The attendee's name. Optional.", "type": "string"},
+              "email": {"description": "Required. The attendee's email address. This field must be present when adding an attendee. It must be a valid email address as per RFC5322.", "type": "string"},
+              "id": {"description": "Output only. The attendee's Profile ID. Optional. Read-only.", "readOnly": true, "type": "string"},
+              "optionalAttendee": {"description": "Optional. Whether this is an optional attendee. Optional. The default is False.", "type": "boolean"},
+              "organizer": {"description": "Output only. Whether the attendee is the organizer of the event. Read-only. The default is False.", "readOnly": true, "type": "boolean"},
+              "resource": {"description": "Optional. Whether the attendee is a resource. Can only be set when the attendee is added to the event for the first time. Subsequent modifications are ignored. Optional. The default is False.", "type": "boolean"},
+              "responseStatus": {"description": "Optional. The attendee's response status. Possible values are: * `needsAction` - The attendee has not responded to the invitation (recommended for new events). * `declined` - The attendee has declined the invitation. * `tentative` - The attendee has tentatively accepted the invitation. * `accepted` - The attendee has accepted the invitation.", "type": "string"},
+              "self": {"description": "Output only. Whether this entry represents the calendar on which this copy of the event appears. Read-only. The default is False.", "readOnly": true, "type": "boolean"}
+            },
+            "required": ["email"],
+            "type": "object"
+          },
+          "GuestPermissions": {
+            "description": "Guest permissions details.",
+            "properties": {
+              "guestsCanInviteOthers": {"description": "Optional. Whether attendees other than the organizer can invite others to the event. Optional.", "type": "boolean"},
+              "guestsCanModify": {"description": "Optional. Whether attendees other than the organizer can modify the event. Optional.", "type": "boolean"},
+              "guestsCanSeeGuests": {"description": "Optional. Whether attendees other than the organizer can see who the event's attendees are. Optional.", "type": "boolean"}
+            },
+            "type": "object"
+          },
+          "Reminder": {
+            "description": "An event reminder.",
+            "properties": {
+              "method": {"description": "Required. How the reminder is delivered to the user. Possible values are: * `email` - Reminders are sent via email. * `popup` - Reminders are sent via a UI popup.", "type": "string"},
+              "minutes": {"description": "Required. Number of minutes in advance that the reminder should be delivered.", "format": "int32", "type": "integer"}
+            },
+            "required": ["method", "minutes"],
+            "type": "object"
+          },
+          "WorkingLocationProperties": {
+            "description": "Properties for working location events.",
+            "properties": {
+              "customLocationLabel": {"description": "Optional. The label for a custom location. Required if type is CUSTOM_LOCATION.", "type": "string"},
+              "type": {"description": "Optional. The type of working location. Optional.", "enum": ["WORKING_LOCATION_TYPE_UNSPECIFIED", "HOME_OFFICE", "CUSTOM_LOCATION"], "type": "string", "x-google-enum-descriptions": ["Unspecified working location type. Will be treated as HOME_OFFICE.", "Home office.", "Custom location."]}
+            },
+            "type": "object"
+          }
+        },
+        "description": "Request message for CreateEvent.",
+        "properties": {
+          "addGoogleMeetUrl": {"description": "Optional. Whether to create and attach a video conference URL for the event. Defaults to False.", "type": "boolean"},
+          "allDay": {"description": "Optional. Whether the event is an all-day event. The default is False. If true, the start and end time are treated as midnight.", "type": "boolean"},
+          "attachments": {"description": "Optional. File attachments for the event. Optional.", "items": {"$ref": "#/$defs/Attachment"}, "type": "array"},
+          "attendeeEmails": {"deprecated": true, "description": "Optional. Deprecated: use `attendees` instead. The additional attendees of the event, as email addresses.", "items": {"type": "string"}, "type": "array"},
+          "attendees": {"description": "Optional. The additional attendees of the event.", "items": {"$ref": "#/$defs/Attendee"}, "type": "array"},
+          "availability": {"description": "Optional. Whether the event blocks time on the calendar. Optional.", "enum": ["AVAILABILITY_UNSPECIFIED", "AVAILABILITY_BUSY", "AVAILABILITY_FREE"], "type": "string", "x-google-enum-descriptions": ["Default value. Will be treated as BUSY.", "The event blocks time on the calendar.", "The event does not block time on the calendar (Free / Available)."]},
+          "calendarId": {"description": "Optional. The calendar ID to create the event on. The default is the user's primary calendar.", "type": "string"},
+          "colorId": {"description": "Optional. The color of the event. This is an ID referring to an entry in the calendar's color palette. Event color ID (string `1`-`11`): * 1: Lavender * 2: Sage * 3: Grape * 4: Flamingo * 5: Banana * 6: Tangerine * 7: Peacock * 8: Graphite * 9: Blueberry * 10: Basil * 11: Tomato.", "type": "string"},
+          "description": {"description": "Optional. Description of the event. Can contain HTML.", "type": "string"},
+          "endTime": {"description": "Required. The end time of the event. Must be a full ISO 8601 timestamp (e.g., '2026-04-30T10:00:00Z').", "type": "string"},
+          "eventType": {"description": "Optional. Type of the event. Optional. Possible values for creation are: * `DEFAULT` - Default event type. * `OUT_OF_OFFICE` - Out of office event type. * `FOCUS_TIME` - Focus time event type. * `WORKING_LOCATION` - Working location event type. * `BIRTHDAY` - Birthday event type.", "enum": ["EVENT_TYPE_UNSPECIFIED", "DEFAULT", "OUT_OF_OFFICE", "FOCUS_TIME", "WORKING_LOCATION", "BIRTHDAY", "FROM_GMAIL"], "type": "string", "x-google-enum-descriptions": ["Will be treated as DEFAULT.", "A regular event. Default value.", "An out-of-office event.", "A focus-time event.", "A working location event.", "A special all-day event with an annual recurrence.", "An event from Gmail. This type of event cannot be created."]},
+          "googleMeetUrl": {"description": "Optional. Allows attaching an existing Google Meet URL or meeting ID to the event.", "type": "string"},
+          "guestPermissions": {"$ref": "#/$defs/GuestPermissions", "description": "Optional. Guest permissions settings for this event. Optional."},
+          "location": {"description": "Optional. Geographic location of the event as free-form text.", "type": "string"},
+          "notificationLevel": {"description": "Optional. Which email notification should be sent for this event update. Possible values are: * `NONE` - No email notifications are sent. * `EXTERNAL_ONLY` - Only external (non-Calendar) attendees receive email notifications (default). * `ALL` - All event attendees receive email notifications.", "enum": ["NOTIFICATION_LEVEL_UNSPECIFIED", "NONE", "EXTERNAL_ONLY", "ALL"], "type": "string", "x-google-enum-descriptions": ["Default value. Will be treated as EXTERNAL_ONLY.", "No email notifications are sent.", "Only external (non-Calendar) attendees receive email notifications.", "All event attendees receive email notifications."]},
+          "overrideReminders": {"description": "Optional. Reminders defined for this event, overriding the default reminders for the calendar.", "items": {"$ref": "#/$defs/Reminder"}, "type": "array"},
+          "recurrenceData": {"description": "Optional. The recurrence data of the event as RRULE, RDATE, or EXDATE strings per RFC 5545.", "items": {"type": "string"}, "type": "array"},
+          "startTime": {"description": "Required. The start time of the event formatted as per ISO 8601.", "type": "string"},
+          "summary": {"description": "Required. Title of the event.", "type": "string"},
+          "timeZone": {"description": "Optional. Time zone of the event formatted as a strictly case-sensitive IANA Time Zone Database name (e.g., 'America/Los_Angeles').", "type": "string"},
+          "visibility": {"description": "Optional. Visibility of the event. Possible values are: * `default` * `public` * `private`.", "type": "string"},
+          "workingLocationProperties": {"$ref": "#/$defs/WorkingLocationProperties", "description": "Optional. Properties for working location events. Optional."}
+        },
+        "required": ["summary", "startTime", "endTime"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "update_event",
+      "description": "Updates a calendar event. Use this tool for queries like: * Update the event 'Meeting with Jane' to be one hour later. * Add john.doe@google.com to the meeting tomorrow. Example: update_event( eventId='event123', summary='Meeting with Jane and John' ) # Updates the summary of event with id 'event123' on the primary calendar.",
+      "inputSchema": {
+        "$defs": {
+          "Attachment": {
+            "description": "A file attachment for an event.",
+            "properties": {
+              "fileUrl": {"description": "Required. URL link to the attachment.", "type": "string"},
+              "title": {"description": "Optional. Attachment title. Optional.", "type": "string"}
+            },
+            "required": ["fileUrl"],
+            "type": "object"
+          },
+          "Attendee": {
+            "description": "An event attendee.",
+            "properties": {
+              "additionalGuests": {"description": "Optional. Number of additional guests. Optional. The default is 0.", "format": "int32", "type": "integer"},
+              "comment": {"description": "Output only. The attendee's response comment. Optional. Read-only.", "readOnly": true, "type": "string"},
+              "displayName": {"description": "Optional. The attendee's name. Optional.", "type": "string"},
+              "email": {"description": "Required. The attendee's email address. This field must be present when adding an attendee. It must be a valid email address as per RFC5322.", "type": "string"},
+              "id": {"description": "Output only. The attendee's Profile ID. Optional. Read-only.", "readOnly": true, "type": "string"},
+              "optionalAttendee": {"description": "Optional. Whether this is an optional attendee. Optional. The default is False.", "type": "boolean"},
+              "organizer": {"description": "Output only. Whether the attendee is the organizer of the event. Read-only. The default is False.", "readOnly": true, "type": "boolean"},
+              "resource": {"description": "Optional. Whether the attendee is a resource. Can only be set when the attendee is added to the event for the first time. Subsequent modifications are ignored. Optional. The default is False.", "type": "boolean"},
+              "responseStatus": {"description": "Optional. The attendee's response status. Possible values are: * `needsAction` - The attendee has not responded to the invitation (recommended for new events). * `declined` - The attendee has declined the invitation. * `tentative` - The attendee has tentatively accepted the invitation. * `accepted` - The attendee has accepted the invitation.", "type": "string"},
+              "self": {"description": "Output only. Whether this entry represents the calendar on which this copy of the event appears. Read-only. The default is False.", "readOnly": true, "type": "boolean"}
+            },
+            "required": ["email"],
+            "type": "object"
+          },
+          "GuestPermissions": {
+            "description": "Guest permissions details.",
+            "properties": {
+              "guestsCanInviteOthers": {"description": "Optional. Whether attendees other than the organizer can invite others to the event. Optional.", "type": "boolean"},
+              "guestsCanModify": {"description": "Optional. Whether attendees other than the organizer can modify the event. Optional.", "type": "boolean"},
+              "guestsCanSeeGuests": {"description": "Optional. Whether attendees other than the organizer can see who the event's attendees are. Optional.", "type": "boolean"}
+            },
+            "type": "object"
+          },
+          "Reminder": {
+            "description": "An event reminder.",
+            "properties": {
+              "method": {"description": "Required. How the reminder is delivered to the user. Possible values are: * `email` - Reminders are sent via email. * `popup` - Reminders are sent via a UI popup.", "type": "string"},
+              "minutes": {"description": "Required. Number of minutes in advance that the reminder should be delivered.", "format": "int32", "type": "integer"}
+            },
+            "required": ["method", "minutes"],
+            "type": "object"
+          }
+        },
+        "description": "Request message for UpdateEvent.",
+        "properties": {
+          "addGoogleMeetUrl": {"description": "Optional. Allows to create or update a Google Meet url for the event.", "type": "boolean"},
+          "addedAttachments": {"description": "Optional. File attachments to add to the event.", "items": {"$ref": "#/$defs/Attachment"}, "type": "array"},
+          "addedAttendeeEmails": {"deprecated": true, "description": "Optional. Deprecated: use `added_attendees` instead.", "items": {"type": "string"}, "type": "array"},
+          "addedAttendees": {"description": "Optional. The additional attendees of the event.", "items": {"$ref": "#/$defs/Attendee"}, "type": "array"},
+          "allDay": {"description": "Optional. Whether the event is an all-day event. Will not be updated if not set.", "type": "boolean"},
+          "availability": {"description": "Optional. Whether the event blocks time on the calendar. Optional.", "enum": ["AVAILABILITY_UNSPECIFIED", "AVAILABILITY_BUSY", "AVAILABILITY_FREE"], "type": "string", "x-google-enum-descriptions": ["Default value. Will be treated as BUSY.", "The event blocks time on the calendar.", "The event does not block time on the calendar (Free / Available)."]},
+          "calendarId": {"description": "Optional. The calendar ID of the event to update. The default is the user's primary calendar.", "type": "string"},
+          "colorId": {"description": "Optional. New color ID of the event. Will not be updated if not set. Event color ID (string `1`-`11`): * 1: Lavender * 2: Sage * 3: Grape * 4: Flamingo * 5: Banana * 6: Tangerine * 7: Peacock * 8: Graphite * 9: Blueberry * 10: Basil * 11: Tomato.", "type": "string"},
+          "description": {"description": "Optional. The new description of the event. Will not be updated if not set.", "type": "string"},
+          "endTime": {"description": "Optional. The new end time of the event formatted as per ISO 8601. Will not be updated if not set.", "type": "string"},
+          "eventId": {"description": "Required. The ID of the event to update.", "type": "string"},
+          "googleMeetUrl": {"description": "Optional. Allows attaching an existing Google Meet URL or meeting ID to the event.", "type": "string"},
+          "guestPermissions": {"$ref": "#/$defs/GuestPermissions", "description": "Optional. Guest permissions settings for this event. Optional."},
+          "location": {"description": "Optional. The new location of the event. Will not be updated if not set.", "type": "string"},
+          "notificationLevel": {"description": "Optional. Which email notification should be sent for this event update. Possible values are: * `NONE` * `EXTERNAL_ONLY` * `ALL`.", "enum": ["NOTIFICATION_LEVEL_UNSPECIFIED", "NONE", "EXTERNAL_ONLY", "ALL"], "type": "string", "x-google-enum-descriptions": ["Default value. Will be treated as EXTERNAL_ONLY.", "No email notifications are sent.", "Only external (non-Calendar) attendees receive email notifications.", "All event attendees receive email notifications."]},
+          "overrideReminders": {"description": "Optional. Reminders defined for this event, overriding any existing reminders and the default reminders for the calendar.", "items": {"$ref": "#/$defs/Reminder"}, "type": "array"},
+          "removedAttachmentFileUrls": {"description": "Optional. File attachments to remove from the event.", "items": {"type": "string"}, "type": "array"},
+          "removedAttendeeEmails": {"description": "Optional. The attendees of the event to remove, as email addresses.", "items": {"type": "string"}, "type": "array"},
+          "startTime": {"description": "Optional. The new start time of the event formatted as per ISO 8601. Will not be updated if not set.", "type": "string"},
+          "summary": {"description": "Optional. The new title of the event. Will not be updated if not set.", "type": "string"},
+          "timeZone": {"description": "Optional. Time zone of the event formatted as a strictly case-sensitive IANA Time Zone Database name (e.g., 'America/Los_Angeles').", "type": "string"},
+          "visibility": {"description": "Optional. New visibility of the event. Possible values are: * `default` * `public` * `private`.", "type": "string"}
+        },
+        "required": ["eventId"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_events",
+      "description": "Lists calendar events in a given calendar satisfying the given conditions. Key Features: * Any Calendar ID. * Time range filtering. * Retrieves ALL events matching the time constraints. Use this tool for queries like: * What's on my calendar tomorrow? * What are my meetings next week? * Do I have any conflicts this afternoon?",
+      "inputSchema": {
+        "properties": {
+          "calendarId": {"description": "Optional. The calendar ID to list events from. The default is the user's primary calendar.", "type": "string"},
+          "endTime": {"description": "Optional. Upper bound (exclusive) for the time window to search. Defaults to the end of time. Must be an ISO 8601 timestamp strictly greater than start_time.", "type": "string"},
+          "eventType": {"description": "Optional. The event types to return.", "items": {"enum": ["EVENT_TYPE_UNSPECIFIED", "DEFAULT", "OUT_OF_OFFICE", "FOCUS_TIME", "WORKING_LOCATION", "BIRTHDAY", "FROM_GMAIL"], "type": "string"}, "type": "array"},
+          "fullText": {"description": "Optional. Free-form search query to search across title, description, location and attendees. The search is case-insensitive and supports substring matching.", "type": "string"},
+          "orderBy": {"description": "Optional. The order in which events should be returned. Possible values are: * `default` * `startTime` * `startTimeDesc` * `lastModified`.", "type": "string"},
+          "pageSize": {"description": "Optional. Maximum number of events returned on one result page. By default the value is 100 events. It is recommended to set pageSize=10 for most queries to save context.", "format": "int32", "type": "integer"},
+          "pageToken": {"description": "Optional. A token retrieved from a previous response's nextPageToken field.", "type": "string"},
+          "startTime": {"description": "Optional. Lower bound (exclusive) for the time window to search. Defaults to the current time if neither time bound is provided.", "type": "string"},
+          "timeZone": {"description": "Optional. Time zone used in the response and to resolve timezone-less dates in the request.", "type": "string"}
+        },
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_event",
+      "description": "Returns a single event from a given calendar. Use this tool for queries like: * Get details for the team meeting. * Show me the event with id event123 on my calendar.",
+      "inputSchema": {
+        "properties": {
+          "calendarId": {"description": "Optional. The calendar ID to get the event from. The default is the user's primary calendar.", "type": "string"},
+          "eventId": {"description": "Required. The ID of the event to get.", "type": "string"}
+        },
+        "required": ["eventId"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "delete_event",
+      "description": "Deletes a calendar event. Use this tool for queries like: * Delete the event with id event123 on my calendar. To cancel or decline an event, use the respond_to_event tool instead.",
+      "inputSchema": {
+        "properties": {
+          "calendarId": {"description": "Optional. The calendar ID of the event to delete. The default is the user's primary calendar.", "type": "string"},
+          "eventId": {"description": "Required. The ID of the event to delete.", "type": "string"},
+          "notificationLevel": {"description": "Optional. Which email notification should be sent for this event update. Possible values are: * `NONE` * `EXTERNAL_ONLY` * `ALL`.", "enum": ["NOTIFICATION_LEVEL_UNSPECIFIED", "NONE", "EXTERNAL_ONLY", "ALL"], "type": "string", "x-google-enum-descriptions": ["Default value. Will be treated as EXTERNAL_ONLY.", "No email notifications are sent.", "Only external (non-Calendar) attendees receive email notifications.", "All event attendees receive email notifications."]}
+        },
+        "required": ["eventId"],
+        "type": "object"
+      }
+    }
+  ],
+  "gmail": [
+    {
+      "name": "create_draft",
+      "description": "Creates a new draft email in the authenticated user's Gmail account. This tool takes recipient addresses, a subject, and body content as inputs. It returns the ID of the created Gmail draft. If the draft is created as a reply to an existing message, the ID of the original message should be passed to the tool in the replyToMessageId field. Creating drafts with attachments is not supported yet.",
+      "inputSchema": {
+        "$defs": {
+          "Attachment": {
+            "description": "Represents an attachment to be included in an email.",
+            "properties": {
+              "content": {"description": "Required. The base64-encoded content of the attachment.", "format": "byte", "type": "string"},
+              "filename": {"description": "Optional. The name of the file to be attached, e.g. \"invoice.pdf\". For inline attachments, this is used for Content-ID generation. For regular attachments, filename is used to specify the filename to email clients. If not provided, the attachment may be received with no name.", "type": "string"},
+              "id": {"description": "Optional. Output only. When present, contains the ID of an external attachment that can be retrieved in a separate `GetMessageAttachment` request.", "readOnly": true, "type": "string"},
+              "inline": {"description": "Optional. If true, this attachment is handled as inline. An inline attachment is a content that is intended to be displayed within the body of an HTML email, as opposed to being listed as a separate file for download. If false or absent, defaults to false, and it's treated as a regular attachment.", "type": "boolean"},
+              "mimeType": {"description": "Optional. The field representing a content or media type must use IANA MIME type. If not provided, defaults to \"application/octet-stream\".", "type": "string"}
+            },
+            "type": "object"
+          }
+        },
+        "description": "Request message for CreateDraft RPC.",
+        "properties": {
+          "attachments": {"description": "Optional. The attachments to include in the email. The combined size of attachments in the message cannot exceed 25MB.", "items": {"$ref": "#/$defs/Attachment"}, "type": "array"},
+          "bcc": {"description": "Optional. The blind carbon copy recipients of the email draft. Each string MUST be a valid plain email address (e.g., \"user@example.com\").", "items": {"type": "string"}, "type": "array"},
+          "body": {"description": "Optional. The main body content of the email draft. If html_body is also provided, this field is treated as the plain-text alternative.", "type": "string"},
+          "cc": {"description": "Optional. The carbon copy recipients of the email draft. Each string MUST be a valid plain email address (e.g., \"user@example.com\").", "items": {"type": "string"}, "type": "array"},
+          "htmlBody": {"description": "The HTML content of the email draft. If provided, this will be used as the rich-text version of the email.", "type": "string"},
+          "replyToMessageId": {"description": "Optional. The ID of the message to reply to. If provided, this will be used as the reply-to message ID for the email draft.", "type": "string"},
+          "subject": {"description": "Optional. The subject line of the email. Defaults to empty if not provided.", "type": "string"},
+          "to": {"description": "Required. The primary recipients of the email draft. Each string MUST be a valid plain email address (e.g., \"user@example.com\").", "items": {"type": "string"}, "type": "array"}
+        },
+        "type": "object"
+      }
+    },
+    {
+      "name": "create_label",
+      "description": "Creates a new label in the authenticated user's Gmail account. Supports creating nested labels (sub-labels) using a forward slash (e.g., 'Projects/Alpha/Sprint-1'). By default, parent labels will be automatically created if they do not exist.",
+      "inputSchema": {
+        "$defs": {
+          "LabelColor": {
+            "description": "The color of the label.",
+            "properties": {
+              "backgroundColor": {"description": "The background color of the label, represented as a hex string (e.g., \"#ffffff\"). Only the following predefined set of color values are allowed: #000000, #434343, #666666, #999999, #cccccc, #efefef, #f3f3f3, #ffffff, #fb4c2f, #ffad47, #fad165, #16a766, #43d692, #4a86e8, #a479e2, #f691b3, #f6c5be, #ffe6c7, #fef1d1, #b9e4d0, #c6f3de, #c9daf8, #e4d7f5, #fcdee8, #efa093, #ffd6a2, #fce8b3, #89d3b2, #a0eac9, #a4c2f4, #d0bcf1, #fbc8d9, #e66550, #ffbc6b, #fcda83, #44b984, #68dfa9, #6d9eeb, #b694e8, #f7a7c0, #cc3a21, #eaa041, #f2c960, #149e60, #3dc789, #3c78d8, #8e63ce, #e07798, #ac2b16, #cf8933, #d5ae49, #0b804b, #2a9c68, #285bac, #653e9b, #b65775, #822111, #a46a21, #aa8831, #076239, #1a764d, #1c4587, #41236d, #83334c, #464646, #e7e7e7, #0d3472, #b6cff5, #0d3b44, #98d7e4, #3d188e, #e3d7ff, #711a36, #fbd3e0, #8a1c0a, #f2b2a8, #7a2e0b, #ffc8af, #7a4706, #ffdeb5, #594c05, #fbe983, #684e07, #fdedc1, #0b4f30, #b3efd3, #04502e, #a2dcc1, #c2c2c2, #4986e7, #2da2bb, #b99aff, #994a64, #f691b2, #ff7537, #ffad46, #662e37, #ebdbde, #cca6ac, #094228, #42d692, #16a765", "type": "string"},
+              "textColor": {"description": "The text color of the label, represented as a hex string (e.g., \"#000000\"). Only the following predefined set of color values are allowed: #000000, #434343, #666666, #999999, #cccccc, #efefef, #f3f3f3, #ffffff, #fb4c2f, #ffad47, #fad165, #16a766, #43d692, #4a86e8, #a479e2, #f691b3, #f6c5be, #ffe6c7, #fef1d1, #b9e4d0, #c6f3de, #c9daf8, #e4d7f5, #fcdee8, #efa093, #ffd6a2, #fce8b3, #89d3b2, #a0eac9, #a4c2f4, #d0bcf1, #fbc8d9, #e66550, #ffbc6b, #fcda83, #44b984, #68dfa9, #6d9eeb, #b694e8, #f7a7c0, #cc3a21, #eaa041, #f2c960, #149e60, #3dc789, #3c78d8, #8e63ce, #e07798, #ac2b16, #cf8933, #d5ae49, #0b804b, #2a9c68, #285bac, #653e9b, #b65775, #822111, #a46a21, #aa8831, #076239, #1a764d, #1c4587, #41236d, #83334c, #464646, #e7e7e7, #0d3472, #b6cff5, #0d3b44, #98d7e4, #3d188e, #e3d7ff, #711a36, #fbd3e0, #8a1c0a, #f2b2a8, #7a2e0b, #ffc8af, #7a4706, #ffdeb5, #594c05, #fbe983, #684e07, #fdedc1, #0b4f30, #b3efd3, #04502e, #a2dcc1, #c2c2c2, #4986e7, #2da2bb, #b99aff, #994a64, #f691b2, #ff7537, #ffad46, #662e37, #ebdbde, #cca6ac, #094228, #42d692, #16a765", "type": "string"}
+            },
+            "type": "object"
+          }
+        },
+        "description": "Request message for CreateLabel RPC.",
+        "properties": {
+          "autoCreateParentLabels": {"description": "Optional. Whether to automatically create parent labels for nested labels (separated by '/'). Defaults to true.", "type": "boolean"},
+          "color": {"$ref": "#/$defs/LabelColor", "description": "Optional. The color of the label."},
+          "displayName": {"description": "Required. The display name of the label to create.", "type": "string"}
+        },
+        "type": "object"
+      }
+    },
+    {
+      "name": "search_threads",
+      "description": "Lists email threads from the authenticated user's Gmail account. This tool can filter threads based on a query string and supports pagination. It returns a list of threads, including their IDs and related messages. Note that the full message bodies are not returned by this tool; use the 'get_thread' tool with a thread ID to fetch the full message body if needed.",
+      "inputSchema": {
+        "properties": {
+          "includeTrash": {"description": "Optional. Include drafts from TRASH in the results. Defaults to false.", "type": "boolean"},
+          "pageSize": {"description": "Optional. The maximum number of threads to return. If unspecified, defaults to 20. The maximum allowed value is 50.", "format": "int32", "type": "integer"},
+          "pageToken": {"description": "Optional. Page token to retrieve a specific page of results in the list. Leave empty to fetch the first page.", "type": "string"},
+          "query": {"description": "Optional. A query string to filter the threads. Natural language queries must be pre-converted into Gmail syntax queries. Supported Operators by Category: Sender & Recipient: from:, to:, cc:, bcc:, deliveredto:, list:. Time & Date: after:YYYY/MM/DD, before:YYYY/MM/DD, older_than:, newer_than:. Content: subject:, has:, filename:, AROUND. Labels & Categories: label:, category:, in:. Status: is:. Size: size:, larger:, smaller:. Logic & Grouping: AND, OR, { }, - (minus), ( ).", "type": "string"}
+        },
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_labels",
+      "description": "Lists all user-defined labels available in the authenticated user's Gmail account. Use this tool to discover the `id` of a user label before calling `label_thread`, `unlabel_thread`, `label_message`, or `unlabel_message`. System labels are not returned by this tool but can be used with their well-known IDs: 'INBOX', 'TRASH', 'SPAM', 'STARRED', 'UNREAD', 'IMPORTANT', 'CHAT', 'DRAFT', 'SENT'.",
+      "inputSchema": {
+        "properties": {
+          "pageSize": {"description": "Optional. The maximum number of labels to return.", "format": "int32", "type": "integer"},
+          "pageToken": {"description": "Optional. Page token to retrieve a specific page of results in the list.", "type": "string"}
+        },
+        "type": "object"
+      }
+    }
+  ],
+  "drive": [
+    {
+      "name": "search_files",
+      "description": "Search for Drive files using a structured query (syntax: `query_term operator values`). Combine clauses with `and`, `or`, `not`, and parentheses. String values must be single-quoted; escape embedded quotes as \\'. Query terms & operators: - `title` (ops: contains, =, !=) - `fullText` (ops: contains) - `mimeType` (ops: contains, =, !=) - `modifiedTime`, `viewedByMeTime`, `createdTime` (ops: <=, <, =, !=, >, >=). Use RFC 3339 UTC. - `parentId` (ops: =, !=). Use 'root' for the user's \"My Drive\". - `owner` (ops: =, !=). Use 'me' for the requesting user. - `sharedWithMe` (ops: =, !=). Values: true or false.",
+      "inputSchema": {
+        "properties": {
+          "excludeContentSnippets": {"description": "If true, the content snippet will be excluded from the response.", "type": "boolean"},
+          "pageSize": {"description": "The maximum number of files to return in each page.", "format": "int32", "type": "integer"},
+          "pageToken": {"description": "The page token to use for pagination.", "type": "string"},
+          "query": {"description": "The search query.", "type": "string"}
+        },
+        "type": "object"
+      }
+    },
+    {
+      "name": "create_file",
+      "description": "Call this tool to create or upload a File to Google Drive. If uploading content, prefer \"text_content\" for text content. For non-UTF8 contents, use the \"base64_content\" field and base64 encode the data. Returns a single File object upon successful creation. Folders can be created by setting the mime type to `application/vnd.google-apps.folder`.",
+      "inputSchema": {
+        "properties": {
+          "base64Content": {"description": "Optional. The base64 encoded content to upload. It's an error to set this and text_content.", "type": "string"},
+          "content": {"description": "The content of the file encoded as base64. DEPRECATED. Use base64_content or text_content instead.", "type": "string"},
+          "contentMimeType": {"description": "The mime type of the content being uploaded. Required when any type of content is provided.", "type": "string"},
+          "disableConversionToGoogleType": {"description": "Set to true to retain the passed in content mime type and not convert to a Google type.", "type": "boolean"},
+          "mimeType": {"description": "DEPRECATED. DO NOT USE!! Set content_mime_type instead.", "type": "string"},
+          "parentId": {"description": "The parent id of the file.", "type": "string"},
+          "textContent": {"description": "Optional. The (UTF-8) text content to upload. It's an error to set this and base64_content.", "type": "string"},
+          "title": {"description": "The title of the file.", "type": "string"}
+        },
+        "type": "object"
+      }
+    },
+    {
+      "name": "copy_file",
+      "description": "Call this tool to copy an existing File in Google Drive. The tool allows specifying a new title and a parent folder for the copy. If the title is not specified, the copy title will be 'Copy of {original title}'. If the parent folder is not specified, the copy will be created in the same folder as the original file.",
+      "inputSchema": {
+        "properties": {
+          "fileId": {"description": "Required. The ID of the file to copy.", "type": "string"},
+          "parentId": {"description": "The parent id of the newly created file. If empty, the file will be created with the same parent as the original file.", "type": "string"},
+          "title": {"description": "The title of the newly created file. If empty, the title will be 'Copy of [original file title]'.", "type": "string"}
+        },
+        "required": ["fileId"],
+        "type": "object"
+      }
+    }
+  ]
+}

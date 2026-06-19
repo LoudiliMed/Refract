@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+
+# venv
+.venv/
+venv/
+env/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# repos clonés pour les benchmarks (re-clonables, cf. README)
+repo_*/
+external_test/
+.claude/
+docs/roadmap_vca.pdf
+src/llm_client.py
+dist/
+*.egg-info/
+__pycache__/
+.pytest_cache/
+.claude/
+dist/
+*.egg-info/
+__pycache__/
+.pytest_cache/
+.claude/
+docs/roadmap_vca.pdf

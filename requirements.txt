@@ -1,0 +1,11 @@
+# CP1 (extraction AST) : stdlib uniquement (ast, json, argparse, sys)
+# CP2 (compteur de tokens) :
+tiktoken
+# CP3 (réponse LLM Haiku 4.5) :
+anthropic
+# API (backend de la démo — main.py) :
+fastapi
+uvicorn[standard]
+python-multipart
+# Tests :
+pytest

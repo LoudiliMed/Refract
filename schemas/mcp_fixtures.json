@@ -1,0 +1,198 @@
+{
+  "$defs": {
+    "Pagination": {
+      "type": "object",
+      "description": "Standard pagination parameters shared across listing endpoints.",
+      "properties": {
+        "page": {"type": "number", "description": "Page number of the results to fetch, starting at 1. Defaults to 1 when omitted."},
+        "perPage": {"type": "number", "description": "Number of results per page, between 1 and 100. Larger values reduce the number of round trips but increase payload size. Defaults to 30."}
+      }
+    }
+  },
+  "tools": [
+    {
+      "name": "github_create_issue",
+      "description": "Create a new issue in a GitHub repository. This tool opens an issue with a title and optional body, assignees, labels and milestone. Use this when a user wants to file a bug report, a feature request, or any trackable task in a repository they have write access to. The authenticated user must have permission to create issues on the target repository, otherwise the call will fail with a 403 error.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "owner": {"type": "string", "description": "The account owner of the repository. This can be either a personal user login or an organization name. Case-insensitive."},
+          "repo": {"type": "string", "description": "The name of the repository without the .git extension and without the owner prefix."},
+          "title": {"type": "string", "description": "The title of the issue. Keep it short and descriptive; this is what shows up in issue lists and notifications."},
+          "body": {"type": "string", "description": "The contents of the issue, in GitHub-flavored Markdown. Optional. You can reference other issues with #number and mention users with @login."},
+          "assignees": {"type": "array", "items": {"type": "string"}, "description": "Logins for users to assign to this issue. Optional. Only users with push access can be assigned."},
+          "labels": {"type": "array", "items": {"type": "string"}, "description": "Labels to associate with this issue. Optional. Labels that do not already exist on the repository will be created automatically."},
+          "milestone": {"type": "number", "description": "The number of the milestone to associate this issue with. Optional."}
+        },
+        "required": ["owner", "repo", "title"],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "github_get_file_contents",
+      "description": "Get the contents of a file or directory from a GitHub repository. Returns the decoded text content for files, or a directory listing for directories. Use this to read source files, configuration, or documentation before making changes. Binary files are returned base64-encoded.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "owner": {"type": "string", "description": "The account owner of the repository (user or organization)."},
+          "repo": {"type": "string", "description": "The name of the repository."},
+          "path": {"type": "string", "description": "The path to the file or directory within the repository, relative to the repository root. Use an empty string for the root directory."},
+          "ref": {"type": "string", "description": "The name of the commit, branch, or tag to read from. Optional; defaults to the repository's default branch."}
+        },
+        "required": ["owner", "repo", "path"],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "github_search_repositories",
+      "description": "Search for GitHub repositories using GitHub's repository search syntax. Supports qualifiers such as language:, stars:, user:, and org:. Use this to discover repositories matching a topic or owned by a specific account. Results are sorted by best match unless otherwise specified.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {"type": "string", "description": "The search query using GitHub repository search syntax, for example 'machine learning language:python stars:>1000'."},
+          "page": {"type": "number", "description": "Page number of the results to fetch, starting at 1. Defaults to 1 when omitted."},
+          "perPage": {"type": "number", "description": "Number of results per page, between 1 and 100. Defaults to 30."}
+        },
+        "required": ["query"],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "github_create_pull_request",
+      "description": "Create a new pull request in a GitHub repository. Opens a PR from a head branch into a base branch with a title and optional body. Use this after pushing commits to a feature branch when the user wants their changes reviewed and merged. The head and base branches must already exist.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "owner": {"type": "string", "description": "The account owner of the repository."},
+          "repo": {"type": "string", "description": "The name of the repository."},
+          "title": {"type": "string", "description": "The title of the new pull request."},
+          "head": {"type": "string", "description": "The name of the branch where your changes are implemented. For cross-repository pull requests, prefix with the fork owner like 'octocat:feature'."},
+          "base": {"type": "string", "description": "The name of the branch you want the changes pulled into. This must be an existing branch on the current repository."},
+          "body": {"type": "string", "description": "The contents of the pull request, in Markdown. Optional."},
+          "draft": {"type": "boolean", "description": "Whether to create the pull request as a draft. Optional; defaults to false."}
+        },
+        "required": ["owner", "repo", "title", "head", "base"],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "github_list_commits",
+      "description": "List commits on a repository branch. Returns commit SHA, author, date and message for each commit. Use this to inspect recent history or find a specific change. Results are paginated.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "owner": {"type": "string", "description": "The account owner of the repository."},
+          "repo": {"type": "string", "description": "The name of the repository."},
+          "sha": {"type": "string", "description": "SHA or branch name to start listing commits from. Optional; defaults to the default branch."},
+          "pagination": {"$ref": "#/$defs/Pagination"}
+        },
+        "required": ["owner", "repo"],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "slack_post_message",
+      "description": "Post a new message to a Slack channel. The message is sent as the authenticated bot user and appears immediately in the channel. Use this to send notifications, updates, or replies that are not part of an existing thread. The bot must be a member of the target channel.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "channel_id": {"type": "string", "description": "The ID of the channel to post to, for example 'C0123456789'. Not the human-readable channel name."},
+          "text": {"type": "string", "description": "The message text to post. Supports Slack markup (mrkdwn) including *bold*, _italic_ and <url|link> syntax."}
+        },
+        "required": ["channel_id", "text"],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "slack_list_channels",
+      "description": "List public channels in the Slack workspace. Returns channel ID, name, topic and member count for each channel. Use this to resolve a human-readable channel name to its ID before posting a message. Archived channels are excluded by default.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {"type": "number", "description": "Maximum number of channels to return, between 1 and 1000. Optional; defaults to 100."},
+          "cursor": {"type": "string", "description": "Pagination cursor returned by a previous call to fetch the next page. Optional."}
+        },
+        "required": [],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "slack_get_channel_history",
+      "description": "Retrieve recent messages from a Slack channel. Returns messages in reverse chronological order with their timestamps, authors and text. Use this to read the recent conversation in a channel before responding. Thread replies are not included unless explicitly requested.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "channel_id": {"type": "string", "description": "The ID of the channel to read messages from."},
+          "limit": {"type": "number", "description": "Number of messages to retrieve, between 1 and 1000. Optional; defaults to 10."}
+        },
+        "required": ["channel_id"],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "fs_read_file",
+      "description": "Read the complete contents of a file from the local filesystem. Returns the file content as UTF-8 text. Use this to inspect a file before editing it. Only paths within the allowed directories can be read; attempts to read outside them are rejected.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {"type": "string", "description": "The absolute path to the file to read. Must be within one of the server's allowed directories."}
+        },
+        "required": ["path"],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "fs_write_file",
+      "description": "Create a new file or completely overwrite an existing file with new content. Use with caution: this replaces the entire file content and cannot be undone. Prefer fs_edit_file for partial changes. Parent directories must already exist.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {"type": "string", "description": "The absolute path of the file to write. Must be within an allowed directory."},
+          "content": {"type": "string", "description": "The full UTF-8 text content to write to the file. Any existing content is replaced."}
+        },
+        "required": ["path", "content"],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "fs_edit_file",
+      "description": "Make a line-based edit to a text file by replacing an exact string match with new text. The old string must match exactly once including whitespace, otherwise the edit fails. Use this for surgical changes that preserve the rest of the file.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {"type": "string", "description": "The absolute path of the file to edit, within an allowed directory."},
+          "oldText": {"type": "string", "description": "The exact text to find and replace. Must appear exactly once in the file, including indentation and line breaks."},
+          "newText": {"type": "string", "description": "The text to replace the matched oldText with."}
+        },
+        "required": ["path", "oldText", "newText"],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "fs_search_files",
+      "description": "Recursively search for files and directories matching a glob pattern under a root directory. Returns the matching paths. Use this to locate files by name when you do not know their exact location. The search respects the allowed directories and skips hidden folders by default.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {"type": "string", "description": "The root directory to start the recursive search from. Must be within an allowed directory."},
+          "pattern": {"type": "string", "description": "A glob pattern to match file and directory names against, for example '**/*.py'."},
+          "excludePatterns": {"type": "array", "items": {"type": "string"}, "description": "Glob patterns to exclude from the results. Optional."}
+        },
+        "required": ["path", "pattern"],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ]
+}
