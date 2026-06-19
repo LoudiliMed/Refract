@@ -4,56 +4,58 @@
 
 # Refract
 
-> MCP proxy that compresses tool schemas. Up to −97% tokens, 100% signal preserved.
-
-Every request your agent makes to an MCP server sends the **full schema catalogue** — even if only one tool is used. Refract sits between the agent and the server, compresses the schemas on the fly, and relays tool calls unchanged.
-
-Zero LLM calls. Fully deterministic. Drop-in compatible with Claude Desktop, Cursor, and any MCP client.
+> Réduit jusqu'à 97% des tokens consommés par vos agents IA quand ils utilisent des outils MCP — sans rien perdre.
 
 ---
 
-## Install
+## Le problème en une phrase
+
+Quand votre agent IA (Claude, Cursor...) se connecte à un outil externe — votre calendrier, vos emails, GitHub — il télécharge **la description complète de tous les outils disponibles**, à chaque fois, même s'il n'en utilise qu'un seul.
+
+C'est comme demander à quelqu'un de lire le manuel entier d'un magasin juste pour acheter du pain.
+
+**Refract corrige ça.** Il se place entre votre agent et le serveur d'outils, et ne laisse passer que ce qui est réellement nécessaire.
+
+---
+
+## Ce que ça change concrètement
+
+| | Sans Refract | Avec Refract |
+|---|---|---|
+| Outils de fichiers (14 outils) | 1 892 tokens | 236 tokens (**−88%**) |
+| Outils Google Calendar (5 outils) | 5 010 tokens | 660 tokens (**−87%**) |
+| Pack entreprise — Calendar + Gmail + Drive (12 outils) | 8 649 tokens | 882 tokens (**−90%**) |
+
+Moins de tokens envoyés = factures API plus basses, réponses plus rapides.
+
+**Et rien n'est perdu.** Chaque vérification a confirmé que les outils restent utilisables à 100% après compression — aucune information nécessaire n'est supprimée.
+
+---
+
+## Installation
 
 ```bash
-pip install refract
+pip install refract-mcp
 ```
+
+C'est tout. Aucune clé API requise, aucun compte à créer.
 
 ---
 
-## Usage
+## Comment l'utiliser
 
-```bash
-# Wrap any stdio MCP server
-refract-proxy --target "npx @modelcontextprotocol/server-filesystem /tmp" --verbose
+### Avec Claude Desktop
 
-# Wrap an HTTP/SSE MCP server
-refract-proxy --target "https://my-mcp-server.com" --mode http --port 8080
-
-# Point at a local JSON schema file (for testing)
-refract-proxy --target schemas/mcp_calendar_schemas.json --verbose
-```
-
-`--verbose` prints the token savings on every `tools/list` call:
-
-```
-[Refract] Connected to npx @modelcontextprotocol/server-filesystem /tmp
-  14 tools  |  1892 → 236 tokens  (88% reduction index)
-```
-
----
-
-## Configure with Claude Desktop
-
-Add this to your `claude_desktop_config.json`:
+Ouvrez votre fichier de configuration Claude Desktop et ajoutez :
 
 ```json
 {
   "mcpServers": {
-    "filesystem-refract": {
+    "mon-outil-via-refract": {
       "command": "refract-proxy",
       "args": [
         "--target",
-        "npx @modelcontextprotocol/server-filesystem /home/user/docs",
+        "npx @modelcontextprotocol/server-filesystem /chemin/vers/dossier",
         "--verbose"
       ]
     }
@@ -61,32 +63,52 @@ Add this to your `claude_desktop_config.json`:
 }
 ```
 
-Replace `--target` with any stdio command, SSE URL, or JSON schema file.
+Remplacez la ligne `--target` par n'importe quel serveur MCP que vous utilisez déjà. Redémarrez Claude Desktop — c'est tout, Refract travaille en arrière-plan.
+
+### En ligne de commande
+
+```bash
+refract-proxy --target "npx @modelcontextprotocol/server-filesystem /tmp" --verbose
+```
+
+L'option `--verbose` affiche en direct les économies réalisées :
+
+```
+[Refract] Connecté à npx @modelcontextprotocol/server-filesystem /tmp
+  14 outils  |  1892 → 236 tokens  (88% de réduction)
+```
 
 ---
 
-## Benchmarks (real, measured)
+## Comment ça marche, sans jargon
 
-| Server | Tools | Before | After (index) | Reduction |
-|---|---|---|---|---|
-| `@mcp/server-filesystem` | 14 | 1 892 tok | 236 tok | **−88%** |
-| `@mcp/server-sequential-thinking` | 1 | 926 tok | 20 tok | **−98%** |
-| Google Calendar | 5 | 5 010 tok | 660 tok | **−87%** |
-| Enterprise (Cal + Gmail + Drive) | 12 | 8 649 tok | 882 tok | **−90%** |
+Imaginez une bibliothèque avec 50 livres.
 
-Signal check passes at 100% on all servers: every parameter, `required` flag, `enum`, and `$ref` is preserved after compression.
+**Sans Refract :** votre agent reçoit un résumé détaillé des 50 livres à chaque question, même si la réponse est dans un seul.
 
----
+**Avec Refract :** votre agent reçoit d'abord une liste de titres (l'index). Une fois qu'il sait quel livre il lui faut, il ne reçoit que le contenu de ce livre-là.
 
-## How it works
+Techniquement :
+- **L'index** (toujours envoyé) : juste les noms des outils et une courte description de chacun.
+- **Le détail** (envoyé seulement si nécessaire) : la description complète de l'outil utilisé, avec tout ce qu'il faut pour bien l'utiliser — rien de plus, rien de moins.
+- **La vérification** : après chaque compression, Refract vérifie automatiquement que rien d'important n'a été supprimé. Si un doute existe, il envoie la version complète plutôt que de prendre un risque.
 
-- **TIER 1 — Index** (always loaded): tool names + one-sentence descriptions + shared `$defs` deduplicated once. This replaces the full catalogue on every request.
-- **TIER 2 — Compressed schema** (on demand): when a tool is called, its full compressed schema is loaded. Types, required params, enums, and `$ref` pointers are kept; verbose boilerplate is stripped.
-- **Signal check**: after every compression, `mcp_signal_check` verifies the callable contract is intact. If any parameter is lost, the proxy falls back to the raw schema and logs a warning — the call never breaks.
+Aucune intelligence artificielle n'intervient dans ce processus — c'est entièrement automatique, rapide et prévisible.
 
 ---
 
-## Python API
+## Compatible avec
+
+- Claude Desktop
+- Cursor
+- N'importe quel client qui suit le standard MCP (Model Context Protocol)
+- N'importe quel serveur MCP existant — vos outils internes, GitHub, Google Workspace, Slack, etc.
+
+---
+
+## Pour les développeurs
+
+### Utilisation en Python
 
 ```python
 from refract_proxy import RefractProxy
@@ -97,31 +119,43 @@ proxy = RefractProxy(
 )
 await proxy.connect()
 
-# Use compressed tools directly with the Anthropic API
-tools = proxy.as_anthropic_tools(use_cache=True)  # adds cache_control on last tool
+# Utiliser les outils compressés directement avec l'API Anthropic
+tools = proxy.as_anthropic_tools(use_cache=True)
 
-# Or serve as a local MCP server (stdio)
+# Ou lancer comme serveur MCP local (stdio)
 await proxy.serve()
 
-# Or expose via HTTP/SSE
+# Ou l'exposer en HTTP/SSE
 await proxy.serve_http()  # → http://localhost:8080/sse
+```
+
+### Mode HTTP/SSE
+
+```bash
+refract-proxy --target "https://mon-serveur-mcp.com" --mode http --port 8080
+```
+
+### Avec un fichier de schémas local (pour tester)
+
+```bash
+refract-proxy --target schemas/mcp_calendar_schemas.json --verbose
 ```
 
 ---
 
-## Anthropic prompt caching
+## Caching Anthropic intégré
 
-Refract integrates with [Anthropic prompt caching](https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching): `as_anthropic_tools()` injects `cache_control: {type: ephemeral}` on the last tool, so the compressed catalogue is cached across requests.
+Refract s'intègre avec le [prompt caching d'Anthropic](https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching) : `as_anthropic_tools()` marque automatiquement le catalogue compressé comme cachable, ce qui réduit encore plus la facture sur les requêtes répétées.
 
-Combined savings (30 days, 100 requests/day, 5 000 tokens):
+Exemple sur 30 jours, 100 requêtes/jour, 5 000 tokens de schémas :
 
-| | Cost |
+| | Coût |
 |---|---|
-| Without Refract, without cache | $45.00 |
-| With Refract + cache | $1.49 |
+| Sans Refract, sans cache | 45,00 $ |
+| Avec Refract + cache | 1,49 $ |
 
 ---
 
-## License
+## Licence
 
-MIT
+MIT — utilisation libre, y compris commerciale.
