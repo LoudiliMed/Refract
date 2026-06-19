@@ -1,15 +1,15 @@
 """
-refract_cli — Point d'entrée CLI du proxy Refract.ai.
+refract_cli — CLI entry point for the Refract proxy.
 
-Usage :
-    # Mode stdio (défaut) — sous-processus local, intégration Claude Desktop / Cursor
+Usage:
+    # stdio mode (default) — local subprocess, Claude Desktop / Cursor integration
     refract-proxy --target "npx @modelcontextprotocol/server-filesystem /tmp" --mode stdio
     refract-proxy --stdio-cmd "npx @modelcontextprotocol/server-filesystem /tmp"
 
-    # Mode http — l'agent se connecte via une URL réseau (http://localhost:8080/sse)
-    refract-proxy --target "https://mon-serveur-mcp.com" --mode http --port 8080
+    # http mode — agent connects via a network URL (http://localhost:8080/sse)
+    refract-proxy --target "https://my-mcp-server.com" --mode http --port 8080
 
-    # Fichier JSON de schémas (tests / catalogue statique), les deux modes marchent
+    # JSON schema file (tests / static catalogue), both modes work
     refract-proxy --target schemas/mcp_calendar_schemas.json --mode http --verbose
 """
 
@@ -28,24 +28,24 @@ def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="refract-proxy",
         description=(
-            "Refract.ai — Proxy MCP qui compresse les schémas de tools.\n"
-            "Branchez-le entre votre agent (Claude, Cursor…) et n'importe quel serveur MCP.\n\n"
-            "Exemples :\n"
-            "  refract-proxy --target https://mon-serveur.com --verbose\n"
+            "Refract — MCP proxy that compresses tool schemas.\n"
+            "Plug it between your agent (Claude, Cursor…) and any MCP server.\n\n"
+            "Examples:\n"
+            "  refract-proxy --target https://my-server.com --verbose\n"
             "  refract-proxy --stdio-cmd \"npx @modelcontextprotocol/server-filesystem /tmp\""
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
-    # --target et --stdio-cmd sont deux façons d'indiquer la cible (mutuellement exclusifs)
+    # --target and --stdio-cmd are two ways to specify the target (mutually exclusive)
     target_group = p.add_mutually_exclusive_group(required=True)
     target_group.add_argument(
         "--target",
         dest="target",
         metavar="URL",
         help=(
-            "Cible MCP : URL HTTP/SSE (https://…), chemin de fichier JSON, "
-            "ou commande stdio (\"npx @mcp/server /path\")"
+            "MCP target: HTTP/SSE URL (https://…), JSON file path, "
+            "or stdio command (\"npx @mcp/server /path\")"
         ),
     )
     target_group.add_argument(
@@ -53,8 +53,8 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="target",
         metavar="CMD",
         help=(
-            "Alias de --target pour les commandes stdio. "
-            "Ex : \"npx @modelcontextprotocol/server-filesystem /tmp\""
+            "Alias for --target for stdio commands. "
+            "Ex: \"npx @modelcontextprotocol/server-filesystem /tmp\""
         ),
     )
 
@@ -63,27 +63,27 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=8080,
         metavar="PORT",
-        help="Port local du proxy en mode HTTP/SSE (défaut : 8080)",
+        help="Local proxy port in HTTP/SSE mode (default: 8080)",
     )
     p.add_argument(
         "--mode",
         choices=["stdio", "http"],
         default="stdio",
         help=(
-            "Transport du proxy : stdio (défaut — sous-processus local, "
-            "Claude Desktop/Cursor) ou http (SSE réseau, URL http://localhost:<port>/sse)"
+            "Proxy transport: stdio (default — local subprocess, "
+            "Claude Desktop/Cursor) or http (SSE network, URL http://localhost:<port>/sse)"
         ),
     )
     p.add_argument(
         "--verbose",
         action="store_true",
-        help="Affiche les tokens avant/après pour chaque requête",
+        help="Print token counts before/after for each request",
     )
     p.add_argument(
         "--log-level",
         default="WARNING",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
-        help="Niveau de log (défaut : WARNING)",
+        help="Log level (default: WARNING)",
     )
     return p
 
@@ -97,16 +97,16 @@ async def _run(args: argparse.Namespace) -> None:
         verbose=args.verbose,
     )
 
-    print(f"[Refract] Connexion à {args.target} …")
+    print(f"[Refract] Connecting to {args.target} …")
     await proxy.connect()
 
     n = len(proxy._tools)
     if args.mode == "http":
-        print(f"[Refract] {n} tools chargés. Démarrage du proxy MCP (HTTP/SSE) …")
+        print(f"[Refract] {n} tools loaded. Starting MCP proxy (HTTP/SSE) …")
         await proxy.serve_http()
     else:
-        print(f"[Refract] {n} tools chargés. Démarrage du proxy MCP (stdio) …")
-        print("[Refract] Prêt — configurez votre agent pour utiliser ce proxy comme serveur MCP.")
+        print(f"[Refract] {n} tools loaded. Starting MCP proxy (stdio) …")
+        print("[Refract] Ready — configure your agent to use this proxy as an MCP server.")
         await proxy.serve()
 
 
@@ -122,9 +122,9 @@ def main(argv: list[str] | None = None) -> None:
     try:
         asyncio.run(_run(args))
     except KeyboardInterrupt:
-        print("\n[Refract] Arrêt du proxy.")
+        print("\n[Refract] Proxy stopped.")
     except Exception as exc:
-        print(f"[Refract] Erreur fatale : {exc}", file=sys.stderr)
+        print(f"[Refract] Fatal error: {exc}", file=sys.stderr)
         sys.exit(1)
 
 

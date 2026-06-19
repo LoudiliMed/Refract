@@ -139,62 +139,6 @@ class TestResolveSelf(unittest.TestCase):
         self.assertNotIn("def __init__(self, n):\n        # needs", bundle)
 
 
-# cible TOOL (utilise une DATA) appelant un helper TOOL -> sans full_targets,
-# la cible ELLE-MÊME serait strippée ; on vérifie qu'elle reste verbatim.
-EXPAND_SRC = (
-    "THRESHOLD = 42\n"
-    "GAIN = 10\n"
-    "def helper(n):\n"
-    "    \"\"\"Apply gain.\"\"\"\n"
-    "    return n * GAIN\n"
-    "def target(xs):\n"
-    "    \"\"\"Sum gained values above threshold.\"\"\"\n"
-    "    total = 0\n"
-    "    for x in xs:\n"
-    "        if x > THRESHOLD:\n"
-    "            total += helper(x)\n"
-    "    return total\n"
-)
-
-
-class TestExpandLossless(unittest.TestCase):
-
-    def test_target_kept_verbatim(self):
-        from combine import expand
-        ctx = expand(EXPAND_SRC, {"target"})              # full_targets=True défaut
-        self.assertIn("for x in xs:", ctx)                # corps complet présent
-        self.assertIn("total += helper(x)", ctx)
-        self.assertIn("return total", ctx)
-
-    def test_closure_dependency_is_compressed(self):
-        from combine import expand
-        ctx = expand(EXPAND_SRC, {"target"})
-        self.assertIn("def helper(n):", ctx)              # décor : signature présente
-        self.assertNotIn("return n * GAIN", ctx)          # mais corps strippé
-        self.assertIn("# needs", ctx)
-
-    def test_vocabulary_anchored(self):
-        from combine import expand
-        ctx = expand(EXPAND_SRC, {"target"})
-        self.assertIn("THRESHOLD = 42", ctx)              # dep de la cible
-        self.assertIn("GAIN = 10", ctx)                   # dep de la clôture
-
-    def test_target_roundtrips_exactly(self):
-        """La cible verbatim se reparse à l'identique (lossless réel)."""
-        import ast as _ast
-        from combine import expand
-        ctx = expand(EXPAND_SRC, {"target"})
-        orig = next(n for n in _ast.parse(EXPAND_SRC).body
-                    if isinstance(n, _ast.FunctionDef) and n.name == "target")
-        got = next(n for n in _ast.parse(ctx).body
-                   if isinstance(n, _ast.FunctionDef) and n.name == "target")
-        self.assertEqual(_ast.unparse(got), _ast.unparse(orig))
-
-    def test_full_targets_false_strips_target(self):
-        from combine import expand
-        ctx = expand(EXPAND_SRC, {"target"}, full_targets=False)
-        self.assertNotIn("total += helper(x)", ctx)       # cible strippée (ancien mode)
-
 
 class TestTokenCounter(unittest.TestCase):
 

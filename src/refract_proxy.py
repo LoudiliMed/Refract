@@ -1,17 +1,17 @@
 """
-refract_proxy — Proxy MCP qui compresse les schémas de tools à la volée.
+refract_proxy — MCP proxy that compresses tool schemas on the fly.
 
-Architecture :
-    Agent (Claude/Cursor) → RefractProxy (serveur MCP local)
-                          → Serveur MCP réel (Gmail, Calendar, GitHub…)
+Architecture:
+    Agent (Claude/Cursor) → RefractProxy (local MCP server)
+                          → Real MCP server (Gmail, Calendar, GitHub…)
 
-Le proxy :
-  1. Se connecte au serveur cible et récupère tous les tools (connect)
-  2. Construit l'index compressé TIER 1 (build_index) + TIER 2 (compress_tool)
-  3. Sert comme serveur MCP local : tools/list renvoie les schémas compressés
-  4. Sur tools/call : vérifie le signal, relaie au serveur cible sans modification
+The proxy:
+  1. Connects to the target server and fetches all tools (connect)
+  2. Builds the compressed TIER 1 index (build_index) + TIER 2 (compress_tool)
+  3. Serves as a local MCP server: tools/list returns compressed schemas
+  4. On tools/call: verifies signal, relays to the target server unchanged
 
-Zéro appel LLM — tout déterministe.
+Zero LLM calls — fully deterministic.
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ from ast_extractor import count_tokens
 logger = logging.getLogger(__name__)
 
 # ─────────────────────────────────────────────────────────────────────
-# Stats globales (exportées pour GET /stats dans main.py)
+# Global stats (exported for GET /stats in main.py)
 # ─────────────────────────────────────────────────────────────────────
 _PROXY_STATS: dict[str, Any] = {}
 
@@ -45,7 +45,7 @@ def _update_stats(server_url: str, tokens_raw: int, tokens_compressed: int) -> N
 
 
 def get_proxy_stats() -> dict:
-    """Retourne les statistiques agrégées de la session proxy."""
+    """Returns aggregated statistics for the proxy session."""
     total_req = sum(v["requests"] for v in _PROXY_STATS.values())
     total_saved = sum(v["tokens_economises"] for v in _PROXY_STATS.values())
     total_raw = sum(v.get("_raw", 0) for v in _PROXY_STATS.values())
@@ -63,28 +63,28 @@ def get_proxy_stats() -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────
-# Signal check léger (sans modifier mcp_signal_check.py)
+# Lightweight signal check (without modifying mcp_signal_check.py)
 # ─────────────────────────────────────────────────────────────────────
 def _signal_ok(raw_tool: dict, compressed: dict) -> bool:
-    """Vérifie que tous les paramètres bruts sont présents dans la version compressée.
+    """Verifies that all raw parameters are present in the compressed version.
 
-    Si des params sont perdus → renvoyer le schéma complet, logger un warning,
-    ne jamais casser l'appel.
+    If params are lost -> send the full schema, log a warning,
+    never break the call.
     """
     raw_params = set((raw_tool.get("inputSchema") or {}).get("properties", {}).keys())
     comp_params = set(compressed.get("params", {}).keys())
     missing = raw_params - comp_params
     if missing:
-        logger.warning("signal_check FAIL '%s' — params perdus : %s", raw_tool["name"], sorted(missing))
+        logger.warning("signal_check FAIL '%s' — lost params: %s", raw_tool["name"], sorted(missing))
         return False
     return True
 
 
 # ─────────────────────────────────────────────────────────────────────
-# Conversion schéma compressé → JSON Schema valide (pour inputSchema MCP)
+# Compressed schema -> valid JSON Schema conversion (for MCP inputSchema)
 # ─────────────────────────────────────────────────────────────────────
 def _param_to_schema(cp: dict) -> dict:
-    """Reconstruit un JSON Schema minimal depuis un param compressé."""
+    """Reconstructs a minimal JSON Schema from a compressed param."""
     if not isinstance(cp, dict):
         return {}
     if "ref" in cp:
@@ -113,7 +113,7 @@ def _param_to_schema(cp: dict) -> dict:
 
 
 def _compressed_to_input_schema(compressed: dict, shared_defs: dict | None = None) -> dict:
-    """inputSchema JSON Schema depuis un tool compressé (pour la réponse MCP)."""
+    """Builds a JSON Schema inputSchema from a compressed tool (for the MCP response)."""
     params = compressed.get("params", {})
     if not params:
         return {"type": "object", "properties": {}}
@@ -128,7 +128,7 @@ def _compressed_to_input_schema(compressed: dict, shared_defs: dict | None = Non
 
 
 # ─────────────────────────────────────────────────────────────────────
-# Client MCP cible (stdio subprocess, SSE/HTTP ou fichier JSON local)
+# Target MCP client (stdio subprocess, SSE/HTTP, or local JSON file)
 # ─────────────────────────────────────────────────────────────────────
 _STDIO_EXECUTABLES = frozenset({
     "npx", "node", "python", "python3", "uvx", "deno", "bun",
@@ -136,18 +136,18 @@ _STDIO_EXECUTABLES = frozenset({
 
 
 class _TargetClient:
-    """Client léger pour se connecter au serveur MCP cible.
+    """Lightweight client to connect to the target MCP server.
 
-    Priorité de dispatch dans list_tools / call_tool :
-      1. Fichier JSON local (tests, catalogue statique)
-      2. Commande stdio (npx, python3, uvx …)
-      3. HTTP/SSE (serveur déployé)
+    Dispatch priority in list_tools / call_tool:
+      1. Local JSON file (tests, static catalogue)
+      2. stdio command (npx, python3, uvx…)
+      3. HTTP/SSE (deployed server)
     """
 
     def __init__(self, target_url: str):
         self.target_url = target_url
 
-    # ── détection du transport ──────────────────────────────────────── #
+    # ── transport detection ─────────────────────────────────────────── #
 
     def _is_local_file(self) -> bool:
         url = self.target_url
@@ -156,16 +156,16 @@ class _TargetClient:
         )
 
     def _is_stdio_cmd(self) -> bool:
-        """True si target_url est une commande shell à lancer en sous-processus."""
+        """True if target_url is a shell command to launch as a subprocess."""
         url = self.target_url
-        # Ne pas intercepter les fichiers déjà gérés par _is_local_file
+        # Don't intercept files already handled by _is_local_file
         if url.startswith("file://") or os.path.isfile(url):
             return False
-        # Exécutables stdio connus (ex : "npx @mcp/server-fs /tmp")
+        # Known stdio executables (e.g. "npx @mcp/server-fs /tmp")
         first_word = shlex.split(url)[0] if url.strip() else ""
         if os.path.basename(first_word) in _STDIO_EXECUTABLES:
             return True
-        # Tout ce qui n'est pas HTTP et n'est pas un fichier → commande stdio
+        # Anything that isn't HTTP and isn't a file -> stdio command
         if not url.startswith("http"):
             return True
         return False
@@ -185,12 +185,12 @@ class _TargetClient:
 
     async def call_tool(self, name: str, arguments: dict) -> list:
         if self._is_local_file():
-            return [{"type": "text", "text": f"[Proxy] Appel simulé de '{name}' (cible locale)"}]
+            return [{"type": "text", "text": f"[Proxy] Simulated call to '{name}' (local target)"}]
         if self._is_stdio_cmd():
             return await self._stdio_call_tool(name, arguments)
         return await self._sse_call_tool(name, arguments)
 
-    # ── fichier JSON statique ────────────────────────────────────────── #
+    # ── static JSON file ─────────────────────────────────────────────── #
 
     @staticmethod
     def _load_json_file(path: str) -> list[dict]:
@@ -206,14 +206,14 @@ class _TargetClient:
                 tools.extend(v)
         return tools
 
-    # ── stdio (sous-processus) ───────────────────────────────────────── #
+    # ── stdio (subprocess) ───────────────────────────────────────────── #
 
     def _stdio_params(self):
-        """Construit StdioServerParameters depuis la commande target_url."""
+        """Builds StdioServerParameters from the target_url command."""
         try:
             from mcp.client.stdio import StdioServerParameters
         except ImportError as exc:
-            raise RuntimeError(f"Lib MCP manquante : {exc}. Faites `pip install mcp`") from exc
+            raise RuntimeError(f"MCP library missing: {exc}. Run `pip install mcp`") from exc
         parts = shlex.split(self.target_url)
         return StdioServerParameters(command=parts[0], args=parts[1:])
 
@@ -235,7 +235,7 @@ class _TargetClient:
             from mcp.client.stdio import stdio_client
             from mcp.client.session import ClientSession
         except ImportError as exc:
-            raise RuntimeError(f"Lib MCP manquante : {exc}. Faites `pip install mcp`") from exc
+            raise RuntimeError(f"MCP library missing: {exc}. Run `pip install mcp`") from exc
 
         params = self._stdio_params()
         async with stdio_client(params) as (read, write):
@@ -249,7 +249,7 @@ class _TargetClient:
             from mcp.client.stdio import stdio_client
             from mcp.client.session import ClientSession
         except ImportError as exc:
-            raise RuntimeError(f"Lib MCP manquante : {exc}") from exc
+            raise RuntimeError(f"MCP library missing: {exc}") from exc
 
         params = self._stdio_params()
         async with stdio_client(params) as (read, write):
@@ -265,7 +265,7 @@ class _TargetClient:
             from mcp.client.sse import sse_client
             from mcp.client.session import ClientSession
         except ImportError as exc:
-            raise RuntimeError(f"Lib MCP manquante : {exc}. Faites `pip install mcp`") from exc
+            raise RuntimeError(f"MCP library missing: {exc}. Run `pip install mcp`") from exc
 
         async with sse_client(self.target_url) as (read, write):
             async with ClientSession(read, write) as session:
@@ -278,7 +278,7 @@ class _TargetClient:
             from mcp.client.sse import sse_client
             from mcp.client.session import ClientSession
         except ImportError as exc:
-            raise RuntimeError(f"Lib MCP manquante : {exc}") from exc
+            raise RuntimeError(f"MCP library missing: {exc}") from exc
 
         async with sse_client(self.target_url) as (read, write):
             async with ClientSession(read, write) as session:
@@ -288,10 +288,10 @@ class _TargetClient:
 
 
 # ─────────────────────────────────────────────────────────────────────
-# Proxy principal
+# Main proxy
 # ─────────────────────────────────────────────────────────────────────
 class RefractProxy:
-    """Proxy MCP : intercepte tools/list et renvoie l'index compressé à la demande."""
+    """MCP proxy: intercepts tools/list and returns the compressed index on demand."""
 
     def __init__(
         self,
@@ -303,22 +303,22 @@ class RefractProxy:
         self.target_url = target_url
         self.port = port
         self.verbose = verbose
-        self.use_cache = use_cache   # injecte cache_control dans as_anthropic_tools()
+        self.use_cache = use_cache   # injects cache_control in as_anthropic_tools()
         self._tools: list[dict] = []
         self._tools_by_name: dict[str, dict] = {}
         self._index: dict = {}
         self._defs: dict = {}
         self._compressed: dict[str, dict] = {}
         self._client = _TargetClient(target_url)
-        # Commande parsée si la cible est un sous-processus stdio, sinon None
+        # Parsed command if target is a stdio subprocess, otherwise None
         self._cmd_parts: list[str] | None = (
             target_url.split() if self._client._is_stdio_cmd() else None
         )
 
-    # ── connexion ──────────────────────────────────────────────────── #
+    # ── connection ─────────────────────────────────────────────────── #
 
     async def connect(self) -> None:
-        """Connexion au serveur cible, récupère les tools et construit l'index compressé."""
+        """Connects to the target server, fetches tools, and builds the compressed index."""
         self._tools = await self._client.list_tools()
         self._defs = collect_defs(self._tools)
         self._index = build_index(self._tools, self._defs)
@@ -330,22 +330,21 @@ class RefractProxy:
             idx_tok = count_tokens(json.dumps(self._index, ensure_ascii=False))
             pct = (1 - idx_tok / raw_tok) * 100 if raw_tok else 0.0
             print(
-                f"[Refract] Connecté à {self.target_url}\n"
+                f"[Refract] Connected to {self.target_url}\n"
                 f"  {len(self._tools)} tools  |  {raw_tok} → {idx_tok} tokens"
-                f"  ({pct:.0f}% réduction index)"
+                f"  ({pct:.0f}% index reduction)"
             )
 
     # ── serving ────────────────────────────────────────────────────── #
 
     def _build_mcp_server(self):
-        """Construit le Server MCP (handlers tools/list + tools/call) partagé
-        entre le mode stdio et le mode HTTP/SSE — un seul jeu de handlers,
-        deux transports possibles.
+        """Builds the MCP Server (tools/list + tools/call handlers) shared
+        between stdio mode and HTTP/SSE mode — one set of handlers, two transports.
         """
         try:
             from mcp.server import Server
         except ImportError as exc:
-            raise RuntimeError(f"Lib MCP manquante : {exc}. Faites `pip install mcp`") from exc
+            raise RuntimeError(f"MCP library missing: {exc}. Run `pip install mcp`") from exc
 
         server = Server("refract-proxy")
         proxy = self
@@ -361,36 +360,36 @@ class RefractProxy:
         return server
 
     async def serve(self) -> None:
-        """Démarre le serveur MCP local en mode stdio.
+        """Starts the local MCP server in stdio mode.
 
-        Utilisé par le CLI (--mode stdio, défaut) et par Claude Desktop / Cursor.
-        Pour HTTP/SSE, voir serve_http() — les deux modes coexistent et
-        partagent les mêmes handlers via _build_mcp_server().
+        Used by the CLI (--mode stdio, default) and by Claude Desktop / Cursor.
+        For HTTP/SSE, see serve_http() — both modes share the same handlers
+        via _build_mcp_server().
         """
         try:
             from mcp.server.stdio import stdio_server
         except ImportError as exc:
-            raise RuntimeError(f"Lib MCP manquante : {exc}. Faites `pip install mcp`") from exc
+            raise RuntimeError(f"MCP library missing: {exc}. Run `pip install mcp`") from exc
 
         server = self._build_mcp_server()
 
         if self.verbose:
-            print(f"[Refract] Serveur MCP démarré (stdio) — cible : {self.target_url}")
+            print(f"[Refract] MCP server started (stdio) — target: {self.target_url}")
 
         init_opts = server.create_initialization_options()
         async with stdio_server() as (read, write):
             await server.run(read, write, init_opts)
 
     def build_asgi_app(self):
-        """Construit l'app ASGI (Starlette) exposant le transport SSE MCP standard.
+        """Builds the ASGI app (Starlette) exposing the standard MCP SSE transport.
 
-        Routes :
-          GET  /sse        — poignée de main SSE (le client garde la connexion ouverte)
-          POST /messages/  — appels JSON-RPC (tools/list, tools/call…)
+        Routes:
+          GET  /sse        — SSE handshake (client keeps the connection open)
+          POST /messages/  — JSON-RPC calls (tools/list, tools/call…)
 
-        Réutilisable de deux façons :
-          - en standalone, via serve_http() (uvicorn dédié sur self.port) ;
-          - montée dans une app FastAPI existante :
+        Can be used in two ways:
+          - standalone, via serve_http() (dedicated uvicorn on self.port);
+          - mounted in an existing FastAPI app:
                 app.mount("/proxy", proxy.build_asgi_app())
         """
         try:
@@ -400,7 +399,7 @@ class RefractProxy:
             from starlette.routing import Mount, Route
         except ImportError as exc:
             raise RuntimeError(
-                f"Lib MCP/Starlette manquante : {exc}. Faites `pip install mcp fastapi`"
+                f"MCP/Starlette library missing: {exc}. Run `pip install mcp fastapi`"
             ) from exc
 
         server = self._build_mcp_server()
@@ -418,34 +417,34 @@ class RefractProxy:
         ])
 
     async def serve_http(self) -> None:
-        """Démarre le proxy en mode HTTP/SSE (au lieu de stdio).
+        """Starts the proxy in HTTP/SSE mode (instead of stdio).
 
-        Permet à un agent de se connecter via une simple URL réseau, sans
-        installation locale ni sous-processus :
+        Allows an agent to connect via a simple network URL, without
+        local installation or subprocess:
             http://localhost:<port>/sse
 
-        Garde serve() (stdio) intact — les deux modes coexistent, le mode
-        est choisi par l'appelant (CLI : --mode http|stdio).
+        Keeps serve() (stdio) intact — both modes coexist, the mode
+        is chosen by the caller (CLI: --mode http|stdio).
         """
         try:
             import uvicorn
         except ImportError as exc:
-            raise RuntimeError(f"uvicorn manquant : {exc}. Faites `pip install uvicorn`") from exc
+            raise RuntimeError(f"uvicorn missing: {exc}. Run `pip install uvicorn`") from exc
 
         asgi_app = self.build_asgi_app()
         url = f"http://localhost:{self.port}/sse"
-        print(f"[Refract] Proxy HTTP démarré → {url}")
+        print(f"[Refract] HTTP proxy started → {url}")
         if self.verbose:
-            print(f"[Refract]   cible : {self.target_url}")
+            print(f"[Refract]   target: {self.target_url}")
 
         config = uvicorn.Config(asgi_app, host="0.0.0.0", port=self.port, log_level="warning")
         server = uvicorn.Server(config)
         await server.serve()
 
-    # ── handlers MCP ───────────────────────────────────────────────── #
+    # ── MCP handlers ───────────────────────────────────────────────── #
 
     def handle_tools_list(self) -> list:
-        """TIER 1 : renvoie les tools avec schémas compressés (index compact via build_index)."""
+        """TIER 1: returns tools with compressed schemas (compact index via build_index)."""
         try:
             from mcp import types as mt
         except ImportError:
@@ -463,7 +462,7 @@ class RefractProxy:
             raw_tokens += raw_tok
             comp_tokens += comp_tok
 
-            # Description courte depuis l'index TIER 1
+            # Short description from TIER 1 index
             short_desc = self._index.get("tools", {}).get(t["name"], "") or t.get("description", "")
 
             result.append(mt.Tool(
@@ -476,26 +475,25 @@ class RefractProxy:
             _update_stats(self.target_url, raw_tokens, comp_tokens)
             if self.verbose:
                 pct = (1 - comp_tokens / raw_tokens) * 100 if raw_tokens else 0.0
-                print(f"[Refract] tools/list : {raw_tokens} → {comp_tokens} tokens ({pct:.0f}%)")
+                print(f"[Refract] tools/list: {raw_tokens} → {comp_tokens} tokens ({pct:.0f}%)")
 
         return result
 
     def as_anthropic_tools(self) -> list[dict]:
-        """Retourne les tools compressés au format Anthropic API, avec cache_control.
+        """Returns compressed tools in Anthropic API format, with cache_control.
 
-        Format de sortie :
+        Output format:
         [
             {"name": "...", "description": "...", "input_schema": {...}},
             ...,
-            {"name": "...", ..., "cache_control": {"type": "ephemeral"}}  # dernier
+            {"name": "...", ..., "cache_control": {"type": "ephemeral"}}  # last one
         ]
 
-        Le ``cache_control`` sur le dernier tool indique à l'API Anthropic de
-        mettre en cache tous les tools de cette liste. Prix réduit de 3,00 $/M
-        à 0,30 $/M pour les hits suivants.
+        The ``cache_control`` on the last tool tells the Anthropic API to cache
+        all tools in the list. Price drops from $3.00/M to $0.30/M for cache hits.
 
         Returns:
-            Liste de dicts compatibles avec le paramètre ``tools`` de l'API Anthropic.
+            List of dicts compatible with the Anthropic API ``tools`` parameter.
         """
         from cache_injector import CacheInjector
 
@@ -513,7 +511,7 @@ class RefractProxy:
         return CacheInjector.inject_cache_control(tools_dicts) if self.use_cache else tools_dicts
 
     async def handle_tool_call(self, tool_name: str, arguments: dict) -> list:
-        """TIER 2 : charge le schéma compressé, vérifie le signal, relaie au serveur cible."""
+        """TIER 2: loads the compressed schema, verifies signal, relays to target server."""
         try:
             from mcp import types as mt
         except ImportError:
@@ -521,13 +519,13 @@ class RefractProxy:
 
         raw_tool = self._tools_by_name.get(tool_name)
         if not raw_tool:
-            return [mt.TextContent(type="text", text=f"Tool '{tool_name}' introuvable dans le proxy.")]
+            return [mt.TextContent(type="text", text=f"Tool '{tool_name}' not found in proxy.")]
 
         compressed = self._compressed.get(tool_name, {})
 
-        # Signal check : si compression a perdu des params → on log, mais on relaie quand même
+        # Signal check: if compression lost params -> log, but relay anyway
         if not _signal_ok(raw_tool, compressed):
-            logger.warning("Signal check FAIL '%s' — appel relayé avec schéma complet", tool_name)
+            logger.warning("Signal check FAIL '%s' — relaying with full schema", tool_name)
 
         if self.verbose:
             print(f"[Refract] → {tool_name}({list(arguments.keys())})")
@@ -535,8 +533,8 @@ class RefractProxy:
         try:
             content = await self._client.call_tool(tool_name, arguments)
             if not content:
-                return [mt.TextContent(type="text", text="(réponse vide du serveur cible)")]
-            # Normalise les éléments retournés
+                return [mt.TextContent(type="text", text="(empty response from target server)")]
+            # Normalize returned items
             items = []
             for item in content:
                 if isinstance(item, dict):
@@ -545,5 +543,5 @@ class RefractProxy:
                     items.append(item)
             return items
         except Exception as exc:
-            logger.error("Erreur relai '%s': %s", tool_name, exc)
-            return [mt.TextContent(type="text", text=f"Erreur proxy : {exc}")]
+            logger.error("Relay error '%s': %s", tool_name, exc)
+            return [mt.TextContent(type="text", text=f"Proxy error: {exc}")]

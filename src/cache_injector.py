@@ -1,52 +1,52 @@
 """
-cache_injector — Prompt caching Anthropic pour les tools MCP compressés par Refract.
+cache_injector — Anthropic prompt caching for MCP tools compressed by Refract.
 
-Le prompt caching Anthropic réduit le coût des tokens répétitifs de 3,00 $/M
-à 0,30 $/M (×10 moins cher) pour les cache hits.
+Anthropic prompt caching reduces the cost of repetitive tokens from $3.00/M
+to $0.30/M (10x cheaper) for cache hits.
 
-Les schémas MCP d'une session Refract ne changent pas d'une requête à l'autre
-→ candidats parfaits au caching.
+MCP schemas in a Refract session don't change between requests
+-> perfect candidates for caching.
 
-Règle Anthropic : on pose cache_control sur le DERNIER élément du bloc
-qu'on veut cacher. Tout ce qui précède cet élément est inclus dans le cache.
+Anthropic rule: set cache_control on the LAST element of the block
+you want to cache. Everything before that element is included in the cache.
 
-Tarifs Anthropic (Claude Sonnet) :
-  Input standard  : 3,00 $/M tokens
-  Cache write     : 3,75 $/M tokens  (premier appel — mise en cache)
-  Cache read      : 0,30 $/M tokens  (appels suivants — hits)
+Anthropic pricing (Claude Sonnet):
+  Standard input : $3.00/M tokens
+  Cache write    : $3.75/M tokens  (first call — cache population)
+  Cache read     : $0.30/M tokens  (subsequent calls — cache hits)
 """
 
 from __future__ import annotations
 
-# ─── tarifs Anthropic ────────────────────────────────────────────────────────
-PRICE_INPUT_USD_PER_M: float = 3.00    # tokens input standard
-PRICE_WRITE_USD_PER_M: float = 3.75   # cache write (premier appel)
-PRICE_READ_USD_PER_M: float = 0.30    # cache read  (hits suivants)
+# ─── Anthropic pricing ───────────────────────────────────────────────────────
+PRICE_INPUT_USD_PER_M: float = 3.00    # standard input tokens
+PRICE_WRITE_USD_PER_M: float = 3.75   # cache write (first call)
+PRICE_READ_USD_PER_M: float = 0.30    # cache read  (subsequent hits)
 
 
 class CacheInjector:
-    """Injecte cache_control dans les tools MCP et calcule les économies Anthropic."""
+    """Injects cache_control into MCP tools and calculates Anthropic savings."""
 
     # ── injection ─────────────────────────────────────────────────────────── #
 
     @staticmethod
     def inject_cache_control(tools: list[dict]) -> list[dict]:
-        """Ajoute ``cache_control: {type: ephemeral}`` sur le dernier tool de la liste.
+        """Adds ``cache_control: {type: ephemeral}`` to the last tool in the list.
 
-        C'est la règle Anthropic : on marque le *dernier* élément du bloc
-        qu'on veut mettre en cache. Tous les éléments précédents sont inclus
-        automatiquement dans le cache.
+        This is the Anthropic rule: mark the *last* element of the block
+        you want to cache. All preceding elements are automatically
+        included in the cache.
 
-        Les tools MCP ne changent pas au fil d'une session Refract → caching
-        100 % efficace dès le deuxième appel.
+        MCP tools don't change during a Refract session -> caching is
+        100% effective from the second call onward.
 
         Args:
-            tools: liste de dicts tools MCP (format Anthropic API ou MCP brut).
-                   Chaque dict contient au minimum ``"name"`` et ``"inputSchema"``.
+            tools: list of MCP tool dicts (Anthropic API or raw MCP format).
+                   Each dict contains at minimum ``"name"`` and ``"inputSchema"``.
 
         Returns:
-            Nouvelle liste (shallow copy) avec cache_control sur le dernier élément.
-            Retourne la liste inchangée si elle est vide.
+            New list (shallow copy) with cache_control on the last element.
+            Returns the list unchanged if empty.
         """
         if not tools:
             return tools
@@ -54,7 +54,7 @@ class CacheInjector:
         result[-1] = {**result[-1], "cache_control": {"type": "ephemeral"}}
         return result
 
-    # ── estimation des économies ──────────────────────────────────────────── #
+    # ── savings estimation ────────────────────────────────────────────────── #
 
     @staticmethod
     def estimate_cache_savings(
@@ -62,36 +62,36 @@ class CacheInjector:
         requests_per_day: int,
         days: int = 30,
     ) -> dict:
-        """Calcule les économies de la combinaison Refract + prompt cache Anthropic.
+        """Calculates savings from combining Refract + Anthropic prompt caching.
 
-        Compare deux scénarios sur ``days`` jours :
+        Compares two scenarios over ``days`` days:
 
-        **Scénario A — sans cache, sans Refract** : on envoie ``tokens`` tokens
-        à chaque requête au tarif input standard (3,00 $/M).
+        **Scenario A — no cache, no Refract**: send ``tokens`` tokens on every
+        request at the standard input price ($3.00/M).
 
-        **Scénario B — avec cache, avec Refract** : premier appel = cache write
-        (3,75 $/M), appels suivants = cache read (0,30 $/M). Les tokens ici
-        sont ceux déjà compressés par Refract — la fonction attend donc le
-        compte *après* compression.
+        **Scenario B — with cache, with Refract**: first call = cache write
+        ($3.75/M), subsequent calls = cache read ($0.30/M). Tokens here
+        are already compressed by Refract — the function expects the count
+        *after* compression.
 
         Args:
-            tokens: nombre de tokens des schémas (après compression Refract).
-            requests_per_day: nombre de requêtes agent par jour.
-            days: durée de la simulation (défaut : 30 jours).
+            tokens: number of schema tokens (after Refract compression).
+            requests_per_day: number of agent requests per day.
+            days: simulation duration (default: 30 days).
 
         Returns:
-            dict avec :
-            - ``cout_sans_cache_sans_refract`` (float) : coût scénario A en USD
-            - ``cout_avec_cache_avec_refract`` (float) : coût scénario B en USD
-            - ``economie_totale_usd`` (float) : A − B, toujours ≥ 0
-            - ``reduction_pct`` (float) : réduction relative en %
+            dict with:
+            - ``cout_sans_cache_sans_refract`` (float): scenario A cost in USD
+            - ``cout_avec_cache_avec_refract`` (float): scenario B cost in USD
+            - ``economie_totale_usd`` (float): A - B, always >= 0
+            - ``reduction_pct`` (float): relative reduction in %
         """
         total_requests = requests_per_day * days
 
-        # Scénario A : tokens × 3$/M × total_requêtes
+        # Scenario A: tokens x $3/M x total_requests
         cout_sans = tokens * PRICE_INPUT_USD_PER_M / 1_000_000 * total_requests
 
-        # Scénario B : cache write (1er appel) + cache reads (appels suivants)
+        # Scenario B: cache write (1st call) + cache reads (subsequent calls)
         cout_avec = (
             tokens * PRICE_WRITE_USD_PER_M / 1_000_000
             + tokens * PRICE_READ_USD_PER_M / 1_000_000 * max(0, total_requests - 1)
@@ -107,22 +107,22 @@ class CacheInjector:
             "reduction_pct": reduction_pct,
         }
 
-    # ── helpers format Anthropic API ──────────────────────────────────────── #
+    # ── Anthropic API format helpers ──────────────────────────────────────── #
 
     @staticmethod
     def to_anthropic_format(tools: list[dict], use_cache: bool = True) -> list[dict]:
-        """Convertit des tools MCP (inputSchema) en format Anthropic API (input_schema).
+        """Converts MCP tools (inputSchema) to Anthropic API format (input_schema).
 
-        Le champ s'appelle ``inputSchema`` en MCP et ``input_schema`` dans l'API
-        Anthropic. Cette méthode renomme le champ et injecte optionnellement
-        ``cache_control`` sur le dernier tool.
+        The field is called ``inputSchema`` in MCP and ``input_schema`` in the
+        Anthropic API. This method renames the field and optionally injects
+        ``cache_control`` on the last tool.
 
         Args:
-            tools: liste de dicts MCP (``name``, ``description``, ``inputSchema``).
-            use_cache: si True, injecte cache_control sur le dernier tool.
+            tools: list of MCP dicts (``name``, ``description``, ``inputSchema``).
+            use_cache: if True, injects cache_control on the last tool.
 
         Returns:
-            Liste de dicts au format Anthropic API.
+            List of dicts in Anthropic API format.
         """
         converted = [
             {

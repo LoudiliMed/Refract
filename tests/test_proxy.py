@@ -325,7 +325,7 @@ def test_serve_http_prints_connection_url(proxy_with_tools, monkeypatch, capsys)
     asyncio.run(proxy_with_tools.serve_http())
 
     captured = capsys.readouterr()
-    assert "[Refract] Proxy HTTP démarré → http://localhost:8123/sse" in captured.out
+    assert "[Refract] HTTP proxy started → http://localhost:8123/sse" in captured.out
 
 
 def test_serve_http_raises_helpful_error_without_uvicorn(proxy_with_tools, monkeypatch):

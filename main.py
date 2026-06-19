@@ -1,17 +1,17 @@
 """
-main.py — API FastAPI du Token Optimizer (backend de la démo).
+main.py — FastAPI backend for the Token Optimizer (demo backend).
 
-5 endpoints :
+5 endpoints:
 
   GET  /                health check
-  POST /compress        upload .py        -> métriques tokens (avant/après, %)
-  POST /compress-text   JSON {code: str}  -> même chose, pour l'outil web Lovable
-  POST /blast-radius    .py + fonction    -> qui casse si on change X
-  POST /mcp-compress    catalogue MCP     -> index TIER 1 vs tout chargé (-90%)
-  POST /mcp-query       requête libre     -> flux réel SANS vs AVEC optimisation
+  POST /compress        upload .py        -> token metrics (before/after, %)
+  POST /compress-text   JSON {code: str}  -> same, for the Lovable web tool
+  POST /blast-radius    .py + function    -> who breaks if you change X
+  POST /mcp-compress    MCP catalog       -> TIER 1 index vs all loaded (-90%)
+  POST /mcp-query       free query        -> real flow WITHOUT vs WITH optimization
 
-CORS ouvert (front Lovable appelle depuis une autre origine).
-Lancement local : uvicorn main:app --reload
+CORS open (Lovable frontend calls from a different origin).
+Local launch: uvicorn main:app --reload
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ import os
 import sys
 from contextlib import asynccontextmanager
 
-# les modules du cœur vivent dans src/ — on les rend importables (point d'entrée Render).
+# core modules live in src/ — make them importable (Render entry point)
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "src"))
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -32,12 +32,12 @@ from ast_extractor import compress, count_tokens, extract
 from mcp_optimizer import build_index, collect_defs, compress_tool
 from cache_injector import CacheInjector
 
-# ── Stats globales de session (accumulées par les endpoints MCP) ─────────────
+# ── Global session stats (accumulated by MCP endpoints) ──────────────────────
 _SESSION_STATS: dict = {
     "total_requests": 0,
     "tokens_economises": 0,
-    "_tokens_raw": 0,      # non exposé, sert au calcul de reduction_moyenne_pct
-    "par_serveur": {},      # clé = filename ou URL
+    "_tokens_raw": 0,      # internal only, used to compute reduction_moyenne_pct
+    "par_serveur": {},      # key = filename or URL
 }
 
 
@@ -53,7 +53,7 @@ def _record_stats(server_key: str, tokens_raw: int, tokens_compressed: int) -> N
     entry["tokens_economises"] += saved
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Proxy MCP monté en HTTP/SSE — /proxy/sse + /proxy/messages
+# MCP proxy mounted over HTTP/SSE — /proxy/sse + /proxy/messages
 # ─────────────────────────────────────────────────────────────────────────────
 from refract_proxy import RefractProxy
 
@@ -68,9 +68,9 @@ _refract_proxy = RefractProxy(target_url=_PROXY_TARGET, verbose=False)
 async def lifespan(app: FastAPI):
     try:
         await _refract_proxy.connect()
-        print(f"[Refract] Proxy HTTP monté → /proxy/sse (cible : {_PROXY_TARGET})")
+        print(f"[Refract] HTTP proxy mounted → /proxy/sse (target: {_PROXY_TARGET})")
     except Exception as exc:
-        print(f"[Refract] Proxy HTTP non connecté au démarrage : {exc}")
+        print(f"[Refract] HTTP proxy not connected at startup: {exc}")
     yield
 
 
@@ -121,11 +121,11 @@ def health() -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 0. Stats de session
+# 0. Session stats
 # ─────────────────────────────────────────────────────────────────────────────
 @app.get("/stats")
 def get_stats() -> dict:
-    """Statistiques agrégées de la session — tokens économisés, coût évité, réduction moyenne."""
+    """Aggregated session statistics — tokens saved, avoided cost, average reduction."""
     raw = _SESSION_STATS["_tokens_raw"]
     saved = _SESSION_STATS["tokens_economises"]
     pct = round(saved / raw * 100, 1) if raw else 0.0
@@ -141,7 +141,7 @@ def get_stats() -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 0b. Estimation des économies Refract + prompt cache Anthropic
+# 0b. Refract + Anthropic prompt cache savings estimate
 # ─────────────────────────────────────────────────────────────────────────────
 class CacheEstimateInput(BaseModel):
     tokens: int
@@ -151,21 +151,21 @@ class CacheEstimateInput(BaseModel):
 
 @app.post("/cache-estimate")
 def cache_estimate(data: CacheEstimateInput) -> dict:
-    """Estime les économies de la combinaison Refract + prompt cache Anthropic.
+    """Estimates savings from combining Refract + Anthropic prompt caching.
 
-    Compare deux scénarios sur ``days`` jours :
-    - **Sans cache / sans Refract** : tarif input standard 3,00 $/M, tous les tokens,
-      toutes les requêtes.
-    - **Avec cache / avec Refract** : cache write 3,75 $/M au premier appel,
-      puis cache read 0,30 $/M (×10 moins cher) pour les hits suivants.
+    Compares two scenarios over ``days`` days:
+    - **No cache / no Refract**: standard input rate $3.00/M, all tokens,
+      all requests.
+    - **With cache / with Refract**: cache write $3.75/M on the first call,
+      then cache read $0.30/M (10x cheaper) for subsequent hits.
 
-    ``tokens`` doit être le nombre de tokens *après* compression par Refract.
-    Utilisez ``/mcp-compress`` pour obtenir ce compte.
+    ``tokens`` must be the number of tokens *after* Refract compression.
+    Use ``/mcp-compress`` to get this count.
     """
     if data.tokens <= 0:
-        raise HTTPException(status_code=400, detail="tokens doit être > 0")
+        raise HTTPException(status_code=400, detail="tokens must be > 0")
     if data.requests_per_day <= 0:
-        raise HTTPException(status_code=400, detail="requests_per_day doit être > 0")
+        raise HTTPException(status_code=400, detail="requests_per_day must be > 0")
     return CacheInjector.estimate_cache_savings(
         tokens=data.tokens,
         requests_per_day=data.requests_per_day,
@@ -174,7 +174,7 @@ def cache_estimate(data: CacheEstimateInput) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 1a. Compression via fichier uploadé
+# 1a. Compression via uploaded file
 # ─────────────────────────────────────────────────────────────────────────────
 @app.post("/compress")
 async def compress_code(file: UploadFile = File(...)) -> dict:
@@ -182,7 +182,7 @@ async def compress_code(file: UploadFile = File(...)) -> dict:
     try:
         compressed = compress(source, tags=True)
     except SyntaxError as e:
-        raise HTTPException(status_code=400, detail=f"Python invalide : {e}")
+        raise HTTPException(status_code=400, detail=f"Invalid Python: {e}")
 
     before = count_tokens(source)
     after = count_tokens(compressed)
@@ -208,7 +208,7 @@ class CodeInput(BaseModel):
 def compress_text(data: CodeInput) -> dict:
     source = data.code
     if not source.strip():
-        raise HTTPException(status_code=400, detail="Code vide")
+        raise HTTPException(status_code=400, detail="Empty code")
 
     try:
         compressed = compress(source, tags=True)
@@ -217,7 +217,7 @@ def compress_text(data: CodeInput) -> dict:
         compressed = ""
         parsable = False
 
-    # Structure JSON pour l'arbre sémantique Lovable
+    # JSON structure for the Lovable semantic tree
     import ast as ast_module
     structure_json = {}
     if parsable:
@@ -296,13 +296,13 @@ async def blast_radius(
     try:
         data = extract(source)
     except SyntaxError as e:
-        raise HTTPException(status_code=400, detail=f"Python invalide : {e}")
+        raise HTTPException(status_code=400, detail=f"Invalid Python: {e}")
 
     fonctions = {f["nom"]: set(f["appels"]) for f in data["fonctions"]}
     if target not in fonctions:
         raise HTTPException(
             status_code=404,
-            detail=f"Fonction '{target}' introuvable. Disponibles : {sorted(fonctions)}",
+            detail=f"Function '{target}' not found. Available: {sorted(fonctions)}",
         )
 
     direct = sorted(n for n, calls in fonctions.items() if target in calls)
@@ -328,18 +328,18 @@ async def blast_radius(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 3. Compression schémas MCP
+# 3. MCP schema compression
 # ─────────────────────────────────────────────────────────────────────────────
 @app.post("/mcp-compress")
 async def mcp_compress(file: UploadFile = File(...)) -> dict:
     try:
         raw = json.loads((await file.read()).decode("utf-8", errors="replace"))
     except json.JSONDecodeError as e:
-        raise HTTPException(status_code=400, detail=f"JSON invalide : {e}")
+        raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
 
     tools = _load_catalog(raw)
     if not tools:
-        raise HTTPException(status_code=400, detail="Aucun tool trouvé dans le fichier.")
+        raise HTTPException(status_code=400, detail="No tools found in file.")
 
     def facing(t: dict) -> dict:
         return {
@@ -384,7 +384,7 @@ async def mcp_compress(file: UploadFile = File(...)) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 4. Flux réel SANS vs AVEC optimisation (requête libre)
+# 4. Real flow WITHOUT vs WITH optimization (free query)
 # ─────────────────────────────────────────────────────────────────────────────
 class QueryInput(BaseModel):
     query: str
@@ -392,7 +392,7 @@ class QueryInput(BaseModel):
 
 
 def _identifier_tool(query: str, tools: list) -> str:
-    """Identifie le tool le plus pertinent par score de mots-clés. Zéro appel LLM."""
+    """Identifies the most relevant tool by keyword score. Zero LLM calls."""
     query_words = set(query.lower().split())
     scores = {}
     for t in tools:
@@ -408,11 +408,11 @@ def _identifier_tool(query: str, tools: list) -> str:
 def mcp_query(data: QueryInput) -> dict:
     tools = data.catalog
     if not tools:
-        raise HTTPException(status_code=400, detail="Catalogue vide")
+        raise HTTPException(status_code=400, detail="Empty catalog")
 
     tokens_query = count_tokens(data.query)
 
-    # SANS optimisation — tous les schémas dans le prompt
+    # WITHOUT optimization — all schemas in the prompt
     all_schemas = [
         {
             "name": t["name"],
@@ -423,12 +423,12 @@ def mcp_query(data: QueryInput) -> dict:
     ]
     tokens_avant = count_tokens(_j(all_schemas))
 
-    # AVEC optimisation — index compact + 1 schéma à la demande
+    # WITH optimization — compact index + 1 schema on demand
     defs = collect_defs(tools)
     index = build_index(tools, defs)
     tokens_index = count_tokens(_j(index))
 
-    # Identification par mots-clés (zéro LLM, zéro coût)
+    # Keyword-based identification (zero LLM, zero cost)
     tool_name = _identifier_tool(data.query, tools)
     tool = next((t for t in tools if t.get("name") == tool_name), None)
     compressed = compress_tool(tool) if tool else {}
@@ -441,9 +441,9 @@ def mcp_query(data: QueryInput) -> dict:
         "tool_identifie": tool_name,
         "flux_sans": {
             "etapes": [
-                {"label": "Requête agent", "tokens": tokens_query},
-                {"label": f"{len(tools)} schémas chargés d'un coup", "tokens": tokens_avant},
-                {"label": "TOTAL envoyé au LLM", "tokens": tokens_query + tokens_avant},
+                {"label": "Agent query", "tokens": tokens_query},
+                {"label": f"{len(tools)} schemas loaded at once", "tokens": tokens_avant},
+                {"label": "TOTAL sent to LLM", "tokens": tokens_query + tokens_avant},
             ],
             "tokens_total": tokens_query + tokens_avant,
             "cout_usd": round(((tokens_query + tokens_avant) / 1_000_000) * 3, 6),
@@ -451,11 +451,11 @@ def mcp_query(data: QueryInput) -> dict:
         },
         "flux_avec": {
             "etapes": [
-                {"label": "Requête agent", "tokens": tokens_query},
-                {"label": "Index compact chargé", "tokens": tokens_index},
-                {"label": f"Tool identifié : {tool_name}", "tokens": 0},
-                {"label": "Schéma compressé chargé", "tokens": tokens_tool},
-                {"label": "TOTAL envoyé au LLM", "tokens": tokens_query + tokens_apres},
+                {"label": "Agent query", "tokens": tokens_query},
+                {"label": "Compact index loaded", "tokens": tokens_index},
+                {"label": f"Tool identified: {tool_name}", "tokens": 0},
+                {"label": "Compressed schema loaded", "tokens": tokens_tool},
+                {"label": "TOTAL sent to LLM", "tokens": tokens_query + tokens_apres},
             ],
             "tokens_index": tokens_index,
             "tokens_tool": tokens_tool,
@@ -467,7 +467,7 @@ def mcp_query(data: QueryInput) -> dict:
     }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 5. Catalogue MCP hébergé (évite les problèmes de repo privé)
+# 5. Hosted MCP catalog (avoids private repo issues)
 # ─────────────────────────────────────────────────────────────────────────────
 import pathlib
 
@@ -475,6 +475,6 @@ import pathlib
 def get_catalog() -> list:
     path = pathlib.Path(__file__).parent / "schemas" / "mcp_calendar_schemas.json"
     if not path.exists():
-        raise HTTPException(status_code=404, detail="mcp_calendar_schemas.json introuvable")
+        raise HTTPException(status_code=404, detail="mcp_calendar_schemas.json not found")
     raw = json.loads(path.read_text())
     return _load_catalog(raw)

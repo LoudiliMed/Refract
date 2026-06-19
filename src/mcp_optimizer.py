@@ -1,17 +1,17 @@
 """
-mcp_optimizer — applique le patron Token Optimizer aux définitions de tools MCP.
+mcp_optimizer — applies the Token Optimizer pattern to MCP tool definitions.
 
-Problème : un client MCP charge TOUS les schémas JSON des tools dans le contexte
-à chaque requête -> coût de tokens récurrent énorme.
+Problem: an MCP client loads ALL tool JSON schemas into context on every
+request -> huge recurring token cost.
 
-Méthode (réutilise le patron du projet) :
-  TIER 1  build_index(tools, defs) -> index compact {nom: desc courte} + $defs
-                                  partagé gardé UNE fois (toujours chargé)
-  TIER 2  compress_tool(tool)  -> schéma comprimé à la demande (params essentiels,
-                                  desc condensée, $ref = pointeur compact vers le
-                                  $defs de l'index, verbeux viré)
+Method (reuses the project pattern):
+  TIER 1  build_index(tools, defs) -> compact index {name: short desc} + shared
+                                  $defs kept ONCE (always loaded)
+  TIER 2  compress_tool(tool)  -> compressed schema on demand (essential params,
+                                  condensed desc, $ref = compact pointer to the
+                                  $defs in the index, verbose stripped)
 
-A (schémas bruts)  ->  B (index + schémas comprimés on-demand)  à coût réduit.
+A (raw schemas)  ->  B (index + compressed schemas on-demand)  at reduced cost.
 """
 
 from __future__ import annotations
@@ -19,15 +19,15 @@ from __future__ import annotations
 import json
 import re
 
-from ast_extractor import count_tokens   # on réutilise la base du projet
+from ast_extractor import count_tokens
 
 
 # --------------------------------------------------------------------------- #
 # helpers
 # --------------------------------------------------------------------------- #
-# préfixes de boilerplate des schémas réels (Google : "Optional. ...", "Required. ...",
-# "Output only. ...", "Deprecated: ...") — sans ça, first_sentence ne garde que le mot
-# vide "Optional." et jette toute la phrase utile.
+# boilerplate prefixes from real schemas (Google: "Optional. ...", "Required. ...",
+# "Output only. ...", "Deprecated: ...") — without this, first_sentence only keeps
+# the empty word "Optional." and discards the useful sentence.
 _BOILER = re.compile(r"^\s*(optional|required|output only|deprecated|read-only)\b[.:]?\s*",
                      re.IGNORECASE)
 
@@ -37,7 +37,7 @@ def first_sentence(text: str, maxlen: int = 140) -> str:
         return ""
     text = text.strip()
     prev = None
-    while prev != text:                       # retire les préfixes boilerplate empilés
+    while prev != text:                       # strip stacked boilerplate prefixes
         prev = text
         text = _BOILER.sub("", text)
     s = re.split(r"(?<=[.!?])\s", text)[0]
@@ -45,39 +45,38 @@ def first_sentence(text: str, maxlen: int = 140) -> str:
 
 
 def _meta(p: dict, out: dict) -> dict:
-    """Reporte le signal transverse (desc/default/format) sur la forme comprimée."""
+    """Carries over cross-cutting signal (desc/default/format) to the compressed form."""
     if p.get("description"):
         out["d"] = first_sentence(p["description"], 80)
     if "default" in p:
-        out["default"] = p["default"]               # valeur par défaut = signal
+        out["default"] = p["default"]               # default value = signal
     if p.get("format"):
         out["fmt"] = p["format"]                     # uri / date-time / byte…
     return out
 
 
 def compress_param(p: dict) -> dict:
-    # $ref partagé : on ne clôture PAS (sinon la définition est dupliquée dans
-    # chaque tool). On garde un pointeur compact vers le $defs gardé une fois
-    # dans l'index (TIER 1).
+    # shared $ref: do NOT inline (otherwise the definition is duplicated in
+    # each tool). Keep a compact pointer to the $defs kept once in the index (TIER 1).
     if "$ref" in p:
         return {"ref": p["$ref"].split("/")[-1]}
 
-    # anyOf / oneOf : unions JSON-Schema. Très courant chez les serveurs Pydantic
-    # (un champ optionnel = anyOf[T, null]). Sans ça on perdait le TYPE entièrement.
+    # anyOf / oneOf: JSON-Schema unions. Very common with Pydantic servers
+    # (an optional field = anyOf[T, null]). Without this we lost the TYPE entirely.
     union = p.get("anyOf") or p.get("oneOf")
     if union:
         branches = [b for b in union if isinstance(b, dict)]
         non_null = [b for b in branches if b.get("type") != "null"]
         out: dict = {}
-        if len(non_null) == 1:                       # optionnel T -> on compresse T
+        if len(non_null) == 1:                       # optional T -> compress T
             out = compress_param(non_null[0])
-        elif non_null:                               # vraie union -> on les garde toutes
+        elif non_null:                               # real union -> keep all branches
             out["any"] = [compress_param(b) for b in non_null]
         if len(non_null) < len(branches):
-            out["null"] = 1                          # nullable (au moins une branche null)
-        # oneOf discriminé (ÉTAPE 2.3) : le discriminant dit au modèle QUEL champ
-        # choisit la branche -> signal critique. On garde propertyName + mapping
-        # (valeur -> nom de $ref, pointeur compact résolu depuis l'index).
+            out["null"] = 1                          # nullable (at least one null branch)
+        # discriminated oneOf: the discriminant tells the model WHICH field
+        # selects the branch -> critical signal. Keep propertyName + mapping
+        # (value -> $ref name, compact pointer resolved from index).
         disc = p.get("discriminator")
         if "any" in out and isinstance(disc, dict) and disc.get("propertyName"):
             d = {"prop": disc["propertyName"]}
@@ -91,26 +90,26 @@ def compress_param(p: dict) -> dict:
     if "type" in p:
         out["t"] = p["type"]
     if "enum" in p:
-        out["enum"] = p["enum"]                      # signal fort -> gardé
+        out["enum"] = p["enum"]                      # strong signal -> kept
     if "pattern" in p:
-        out["pat"] = p["pattern"]                    # contrainte de forme (regex) -> signal (tier enum)
+        out["pat"] = p["pattern"]                    # format constraint (regex) -> signal
     if "minimum" in p:
-        out["min"] = p["minimum"]                    # borne numérique (ÉTAPE 2.4) -> peu coûteux
+        out["min"] = p["minimum"]                    # numeric bound -> low cost
     if "maximum" in p:
         out["max"] = p["maximum"]
     if p.get("type") == "array" and isinstance(p.get("items"), dict):
-        # récursion sur les items : capture $ref / enum / type imbriqués (ex. un
-        # tableau d'Attendee, ou un tableau d'enum) — sinon ce signal est perdu.
+        # recurse on items: captures nested $ref / enum / type (e.g. array of
+        # Attendee, or array of enum) — otherwise this signal is lost.
         of = compress_param(p["items"])
         if of:
             out["of"] = of
 
-    # propriétés : top-level + FUSION des sous-schémas allOf (ÉTAPE 2.1).
-    # allOf = « valide contre TOUS les sous-schémas » -> composition d'objet.
-    # On fusionne les propriétés des branches inline (la composante compressible)
-    # et on garde les branches $ref comme pointeurs (jamais inlinées) dans `all`.
+    # properties: top-level + MERGE of allOf sub-schemas.
+    # allOf = "valid against ALL sub-schemas" -> object composition.
+    # We merge properties from inline branches (the compressible component)
+    # and keep $ref branches as pointers (never inlined) in `all`.
     props: dict = {}
-    if isinstance(p.get("properties"), dict):        # objet imbriqué (après $ref)
+    if isinstance(p.get("properties"), dict):        # nested object (after $ref)
         props.update({k: compress_param(v) for k, v in p["properties"].items()})
     all_refs: list = []
     for sub in p.get("allOf") or []:
@@ -118,25 +117,25 @@ def compress_param(p: dict) -> dict:
             continue
         cs = compress_param(sub)
         if "props" in cs:
-            props.update(cs["props"])                # merge des propriétés
+            props.update(cs["props"])                # merge properties
         if "ref" in cs:
-            all_refs.append(cs)                      # branche $ref -> gardée en pointeur
-        for k in ("t", "enum", "of"):                # report type/enum/items d'un sous-schéma
+            all_refs.append(cs)                      # $ref branch -> kept as pointer
+        for k in ("t", "enum", "of"):                # carry over type/enum/items from sub-schema
             if k in cs and k not in out:
                 out[k] = cs[k]
     if props:
         out["props"] = props
         out.setdefault("t", "object")
     if all_refs:
-        out["all"] = all_refs                        # sous-schémas $ref à satisfaire aussi
+        out["all"] = all_refs                        # $ref sub-schemas to also satisfy
     return _meta(p, out)
 
 
 def compress_tool(tool: dict, defs: dict | None = None) -> dict:
-    """Schéma comprimé : desc condensée + params essentiels (type/req/enum/desc courte).
+    """Compressed schema: condensed desc + essential params (type/req/enum/short desc).
 
-    Les $ref vers le $defs partagé restent des pointeurs compacts ({ref: Nom}) :
-    la définition n'est PAS inlinée ici, elle vit une seule fois dans l'index.
+    $ref pointers to the shared $defs remain compact ({ref: Name}):
+    the definition is NOT inlined here, it lives once in the index.
     """
     sch = tool.get("inputSchema", {})
     props = sch.get("properties", {})
@@ -153,18 +152,18 @@ def compress_tool(tool: dict, defs: dict | None = None) -> dict:
 
 
 def compress_defs(defs: dict) -> dict:
-    """Compresse le $defs partagé une seule fois (gardé dans l'index, TIER 1)."""
+    """Compresses the shared $defs once (kept in the index, TIER 1)."""
     return {name: compress_param(d) for name, d in (defs or {}).items()}
 
 
 def collect_defs(tools: list[dict]) -> dict:
-    """Agrège les `$defs` EMBARQUÉS dans chaque `inputSchema` (cas réel : les vrais
-    serveurs MCP — Gmail, Calendar… — embarquent leurs définitions par tool, draft-07).
+    """Aggregates `$defs` EMBEDDED in each `inputSchema` (real-world case: actual
+    MCP servers — Gmail, Calendar… — embed their definitions per tool, draft-07).
 
-    Plusieurs tools dupliquent les MÊMES définitions (ex. Calendar : `Attendee`,
-    `Reminder`… répétés dans `create_event` ET `update_event`). On les dédoublonne
-    par nom -> on les gardera UNE seule fois dans l'index (TIER 1) = la tâche (a).
-    Première définition vue gagne (elles sont identiques entre tools en pratique).
+    Multiple tools duplicate the SAME definitions (e.g. Calendar: `Attendee`,
+    `Reminder`… repeated in `create_event` AND `update_event`). Deduplicated
+    by name -> kept ONCE in the index (TIER 1).
+    First definition seen wins (they are identical across tools in practice).
     """
     defs: dict = {}
     for t in tools:
@@ -175,27 +174,27 @@ def collect_defs(tools: list[dict]) -> dict:
 
 
 # --------------------------------------------------------------------------- #
-# garde-fous : aucun construct non géré ne doit être droppé EN SILENCE.
-# compress_param fait au mieux ; ces deux sondes recensent ce qu'il ne sait pas
-# (encore) traduire sans perte -> mcp_signal_check les transforme en FLAG.
+# safety guards: no unhandled construct should be silently dropped.
+# compress_param does its best; these two probes list what it cannot yet
+# translate losslessly -> mcp_signal_check turns them into FLAGs.
 # --------------------------------------------------------------------------- #
-# clés JSON-Schema que compress_param NE préserve pas encore (cf. ÉTAPE 2).
+# JSON-Schema keys that compress_param does NOT yet preserve
 UNHANDLED_KEYS = frozenset({
-    # allOf : géré (ÉTAPE 2.1) -> fusion des propriétés + $ref gardés en pointeurs.
-    # discriminator : géré (ÉTAPE 2.3) -> propertyName + mapping préservés (clé "disc").
-    # minimum/maximum : gérés (ÉTAPE 2.4) -> bornes préservées (clés "min"/"max").
+    # allOf: handled (STEP 2.1) -> property merge + $ref kept as pointers.
+    # discriminator: handled (STEP 2.3) -> propertyName + mapping preserved ("disc" key).
+    # minimum/maximum: handled (STEP 2.4) -> bounds preserved ("min"/"max" keys).
     "exclusiveMinimum", "exclusiveMaximum", "multipleOf",
-    # pattern : géré (ÉTAPE 2.2) -> préservé comme signal (clé "pat").
-    "minLength", "maxLength", "minItems", "maxItems",  # contraintes encore non gérées
+    # pattern: handled (STEP 2.2) -> preserved as signal ("pat" key).
+    "minLength", "maxLength", "minItems", "maxItems",  # constraints not yet handled
 })
 
 
 def unhandled_constructs(node: dict) -> set[str]:
-    """Recense récursivement les constructs non gérés présents dans un schéma brut.
+    """Recursively lists unhandled constructs present in a raw schema.
 
-    Traverse properties / items / anyOf / oneOf / allOf. NE suit PAS les `$ref`
-    (gardés en pointeurs ; les cycles sont traités par `ref_cycles`). Sert de
-    garde-fou : tout ce qui est ici est listé puis FLAGé, jamais perdu en silence.
+    Traverses properties / items / anyOf / oneOf / allOf. Does NOT follow `$ref`
+    (kept as pointers; cycles handled by `ref_cycles`). Safety guard: anything
+    found here is listed then FLAGged, never silently dropped.
     """
     found: set[str] = set()
 
@@ -217,10 +216,10 @@ def unhandled_constructs(node: dict) -> set[str]:
 
 
 def ref_cycles(defs: dict) -> set[str]:
-    """Détecte les `$defs` pris dans un cycle de `$ref` (anti-boucle-infinie / crash).
+    """Detects `$defs` caught in a `$ref` cycle (prevents infinite loop / crash).
 
-    Construit le graphe nom -> noms référencés, puis DFS coloré : une arête vers un
-    nœud GRIS (dans la pile courante) = cycle. Renvoie les noms impliqués.
+    Builds the graph name -> referenced names, then colored DFS: an edge to a
+    GRAY node (currently on the stack) = cycle. Returns the names involved.
     """
     def refs_of(s, acc: set[str]) -> set[str]:
         if isinstance(s, dict):
@@ -234,7 +233,7 @@ def ref_cycles(defs: dict) -> set[str]:
         return acc
 
     graph = {name: refs_of(d, set()) for name, d in (defs or {}).items()}
-    color: dict[str, int] = {n: 0 for n in graph}        # 0 blanc, 1 gris, 2 noir
+    color: dict[str, int] = {n: 0 for n in graph}        # 0 white, 1 gray, 2 black
     stack: list[str] = []
     in_cycle: set[str] = set()
 
@@ -242,9 +241,9 @@ def ref_cycles(defs: dict) -> set[str]:
         color[n] = 1
         stack.append(n)
         for m in graph.get(n, ()):
-            if m not in graph:                           # ref externe/inconnue -> ignorée
+            if m not in graph:                           # external/unknown ref -> skip
                 continue
-            if color[m] == 1:                            # arête arrière -> cycle
+            if color[m] == 1:                            # back edge -> cycle
                 in_cycle.update(stack[stack.index(m):])
             elif color[m] == 0:
                 dfs(m)
@@ -258,7 +257,7 @@ def ref_cycles(defs: dict) -> set[str]:
 
 
 def build_index(tools: list[dict], defs: dict | None = None) -> dict:
-    """TIER 1 : toujours chargé. Noms -> phrase courte + $defs partagé gardé une fois."""
+    """TIER 1: always loaded. Names -> short sentence + shared $defs kept once."""
     idx: dict = {"tools": {t["name"]: first_sentence(t.get("description", ""), 70)
                            for t in tools}}
     if defs:
@@ -281,17 +280,16 @@ if __name__ == "__main__":
     defs = data.get("$defs", {})
 
     raw_all = count_tokens(_j(tools))
-    index = build_index(tools, defs)          # $defs partagé gardé une fois ici
+    index = build_index(tools, defs)
     idx_tok = count_tokens(_j(index))
 
-    print(f"{len(tools)} tools MCP\n")
-    print(f"{'':<34}{'tokens':>8}")
+    print(f"{len(tools)} MCP tools\n")
+    print(f"{'':34}{'tokens':>8}")
     print("-" * 44)
-    print(f"{'A — tous les schémas bruts':<34}{raw_all:>8}   (chargé à CHAQUE requête aujourd'hui)")
-    print(f"{'TIER 1 — index complet':<34}{idx_tok:>8}   (toujours chargé)")
+    print(f"{'A — all raw schemas':<34}{raw_all:>8}   (loaded on EVERY request today)")
+    print(f"{'TIER 1 — full index':<34}{idx_tok:>8}   (always loaded)")
 
-    # compression par tool
-    print(f"\n{'tool':<26}{'brut':>7}{'comprimé':>10}{'gain':>7}")
+    print(f"\n{'tool':<26}{'raw':>7}{'compressed':>10}{'gain':>7}")
     print("-" * 50)
     tot_raw = tot_comp = 0
     for t in tools:
@@ -301,11 +299,10 @@ if __name__ == "__main__":
         tot_comp += cb
         print(f"{t['name']:<26}{rb:>7}{cb:>10}{(1-cb/rb)*100:>6.0f}%")
     print("-" * 50)
-    print(f"{'TOTAL schémas':<26}{tot_raw:>7}{tot_comp:>10}{(1-tot_comp/tot_raw)*100:>6.0f}%")
+    print(f"{'TOTAL schemas':<26}{tot_raw:>7}{tot_comp:>10}{(1-tot_comp/tot_raw)*100:>6.0f}%")
 
-    # scénario réaliste : une requête utilise k tools
-    print("\n=== Scénario : une requête utilise k tools ===")
-    print(f"{'k':>3}{'  aujourd hui (A)':>18}{'  deux étages (B)':>19}{'  réduction':>12}")
+    print("\n=== Scenario: one request uses k tools ===")
+    print(f"{'k':>3}{'  today (A)':>18}{'  two-tier (B)':>19}{'  reduction':>12}")
     by_name = {t["name"]: t for t in tools}
     used = ["github_create_issue", "fs_read_file", "slack_post_message"]
     for k in (1, 2, 3):
