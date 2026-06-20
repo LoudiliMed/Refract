@@ -29,6 +29,8 @@ dependencies = [
     "httpx>=0.24",
     "click",
     "python-multipart>=0.0.6",
+    "fastembed>=0.2",
+    "numpy>=1.24",
 ]
 
 [project.scripts]

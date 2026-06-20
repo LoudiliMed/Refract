@@ -391,17 +391,41 @@ class QueryInput(BaseModel):
     catalog: list
 
 
+# Per-catalog router cache: sorted-names tuple -> SemanticRouter instance.
+# Avoids re-embedding on every request when the same catalog is reused.
+_query_router_cache: dict[tuple, object] = {}
+
+
 def _identifier_tool(query: str, tools: list) -> str:
-    """Identifies the most relevant tool by keyword score. Zero LLM calls."""
-    query_words = set(query.lower().split())
-    scores = {}
-    for t in tools:
-        name = t.get("name", "").lower().replace("_", " ")
-        desc = t.get("description", "").lower()
-        score = sum(1 for w in query_words if w in name or w in desc)
-        scores[t.get("name", "")] = score
-    best = max(scores, key=scores.get) if scores else ""
-    return best
+    """Identifies the most relevant tool using semantic similarity.
+
+    Uses SemanticRouter (fastembed BAAI/bge-small-en-v1.5) for embedding-based
+    cosine similarity matching.  Falls back to keyword scoring if fastembed is
+    not installed or if no tool exceeds the confidence threshold.
+
+    The indexed router is cached by tool-name set so the embedding step only
+    runs once per unique catalog, not on every request.
+    """
+    from semantic_router import SemanticRouter, _keyword_score
+
+    # Cache key: sorted tuple of tool names (order-independent identity)
+    cache_key = tuple(sorted(t.get("name", "") for t in tools))
+    router = _query_router_cache.get(cache_key)
+
+    if router is None:
+        try:
+            router = SemanticRouter()
+            router.index_tools(tools)
+            _query_router_cache[cache_key] = router
+        except RuntimeError:
+            # fastembed not available — use keyword fallback
+            return _keyword_score(query, tools)
+
+    result = router.find_best_tool_with_threshold(query, min_score=0.3)
+    if result is None:
+        # No confident semantic match — fall back to keyword scoring
+        return _keyword_score(query, tools)
+    return result
 
 
 @app.post("/mcp-query")
@@ -428,7 +452,7 @@ def mcp_query(data: QueryInput) -> dict:
     index = build_index(tools, defs)
     tokens_index = count_tokens(_j(index))
 
-    # Keyword-based identification (zero LLM, zero cost)
+    # Semantic identification (zero LLM, fully local)
     tool_name = _identifier_tool(data.query, tools)
     tool = next((t for t in tools if t.get("name") == tool_name), None)
     compressed = compress_tool(tool) if tool else {}

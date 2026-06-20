@@ -314,6 +314,8 @@ class RefractProxy:
         self._cmd_parts: list[str] | None = (
             target_url.split() if self._client._is_stdio_cmd() else None
         )
+        # Semantic router — lazy-initialized in connect()
+        self._router = None
 
     # ── connection ─────────────────────────────────────────────────── #
 
@@ -325,6 +327,18 @@ class RefractProxy:
         self._tools_by_name = {t["name"]: t for t in self._tools}
         self._compressed = {t["name"]: compress_tool(t, self._defs) for t in self._tools}
 
+        # Build semantic router (requires fastembed; degrades gracefully without it)
+        try:
+            from semantic_router import SemanticRouter
+            self._router = SemanticRouter()
+            self._router.index_tools(self._tools)
+        except RuntimeError:
+            logger.warning(
+                "fastembed not available — semantic routing disabled, "
+                "falling back to keyword matching"
+            )
+            self._router = None
+
         if self.verbose:
             raw_tok = count_tokens(json.dumps(self._tools, ensure_ascii=False))
             idx_tok = count_tokens(json.dumps(self._index, ensure_ascii=False))
@@ -334,6 +348,33 @@ class RefractProxy:
                 f"  {len(self._tools)} tools  |  {raw_tok} → {idx_tok} tokens"
                 f"  ({pct:.0f}% index reduction)"
             )
+
+    def identify_tool(self, query: str, min_score: float = 0.3) -> str | None:
+        """Return the best matching tool name for *query*, or ``None`` if uncertain.
+
+        Uses the semantic router when available (fastembed installed), falls
+        back to keyword scoring otherwise.  Returns ``None`` — never a guess —
+        when confidence is below *min_score*, so the caller can send the full
+        compact index instead of routing to the wrong tool.
+
+        Args:
+            query: natural language description of what the agent wants to do.
+            min_score: minimum cosine similarity required (default 0.3).
+
+        Returns:
+            Tool name string, or ``None`` if no confident match found.
+        """
+        if self._router is not None:
+            tool_name = self._router.find_best_tool_with_threshold(query, min_score=min_score)
+            if tool_name is None:
+                logger.warning(
+                    "SemanticRouter: no confident match for query '%s'", query[:80]
+                )
+            return tool_name
+        # Keyword fallback when fastembed is unavailable
+        from semantic_router import _keyword_score
+        result = _keyword_score(query, self._tools)
+        return result or None
 
     # ── serving ────────────────────────────────────────────────────── #
 
