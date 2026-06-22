@@ -223,8 +223,4 @@ Example over 30 days, 100 requests/day, 5,000 tokens of schemas:
 MIT — free to use, including commercially.
 ENDOFREADME
 
-cd ~/MCP-repo
-git add README.md
-git commit -m "Force English README"
-git push origin main
 
