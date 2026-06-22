@@ -148,6 +148,33 @@ def test_main_connects_and_serve_called(tmp_path, monkeypatch):
     assert serve_called, "serve() doit avoir été appelé"
 
 
+def test_main_verbose_does_not_write_diagnostics_to_stdout(tmp_path, monkeypatch, capsys):
+    """Le mode verbose doit écrire les logs Refract sur stderr, pas stdout."""
+    import json
+
+    schema_file = tmp_path / "verbose-fixture.json"
+    schema_file.write_text(json.dumps([
+        {
+            "name": "verbose_tool",
+            "description": "A verbose test tool",
+            "inputSchema": {"type": "object", "properties": {"x": {"type": "string"}}},
+        }
+    ]), encoding="utf-8")
+
+    import refract_proxy as rp
+
+    async def mock_serve(self):
+        return None
+
+    monkeypatch.setattr(rp.RefractProxy, "serve", mock_serve)
+
+    main(["--target", str(schema_file), "--verbose"])
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "[Refract]" in captured.err
+
+
 def test_main_mode_http_calls_serve_http(tmp_path, monkeypatch):
     """--mode http doit appeler serve_http() et NE PAS appeler serve() (stdio)."""
     import json

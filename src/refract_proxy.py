@@ -346,7 +346,8 @@ class RefractProxy:
             print(
                 f"[Refract] Connected to {self.target_url}\n"
                 f"  {len(self._tools)} tools  |  {raw_tok} → {idx_tok} tokens"
-                f"  ({pct:.0f}% index reduction)"
+                f"  ({pct:.0f}% index reduction)",
+                file=sys.stderr,
             )
 
     def identify_tool(self, query: str, min_score: float = 0.3) -> str | None:
@@ -415,7 +416,7 @@ class RefractProxy:
         server = self._build_mcp_server()
 
         if self.verbose:
-            print(f"[Refract] MCP server started (stdio) — target: {self.target_url}")
+            print(f"[Refract] MCP server started (stdio) — target: {self.target_url}", file=sys.stderr)
 
         init_opts = server.create_initialization_options()
         async with stdio_server() as (read, write):
@@ -474,9 +475,9 @@ class RefractProxy:
 
         asgi_app = self.build_asgi_app()
         url = f"http://localhost:{self.port}/sse"
-        print(f"[Refract] HTTP proxy started → {url}")
+        print(f"[Refract] HTTP proxy started → {url}", file=sys.stderr)
         if self.verbose:
-            print(f"[Refract]   target: {self.target_url}")
+            print(f"[Refract]   target: {self.target_url}", file=sys.stderr)
 
         config = uvicorn.Config(asgi_app, host="0.0.0.0", port=self.port, log_level="warning")
         server = uvicorn.Server(config)
@@ -516,7 +517,10 @@ class RefractProxy:
             _update_stats(self.target_url, raw_tokens, comp_tokens)
             if self.verbose:
                 pct = (1 - comp_tokens / raw_tokens) * 100 if raw_tokens else 0.0
-                print(f"[Refract] tools/list: {raw_tokens} → {comp_tokens} tokens ({pct:.0f}%)")
+                print(
+                    f"[Refract] tools/list: {raw_tokens} → {comp_tokens} tokens ({pct:.0f}%)",
+                    file=sys.stderr,
+                )
 
         return result
 
@@ -569,7 +573,7 @@ class RefractProxy:
             logger.warning("Signal check FAIL '%s' — relaying with full schema", tool_name)
 
         if self.verbose:
-            print(f"[Refract] → {tool_name}({list(arguments.keys())})")
+            print(f"[Refract] → {tool_name}({list(arguments.keys())})", file=sys.stderr)
 
         try:
             content = await self._client.call_tool(tool_name, arguments)

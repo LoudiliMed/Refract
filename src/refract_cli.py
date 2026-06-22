@@ -97,16 +97,16 @@ async def _run(args: argparse.Namespace) -> None:
         verbose=args.verbose,
     )
 
-    print(f"[Refract] Connecting to {args.target} …")
+    print(f"[Refract] Connecting to {args.target} …", file=sys.stderr)
     await proxy.connect()
 
     n = len(proxy._tools)
     if args.mode == "http":
-        print(f"[Refract] {n} tools loaded. Starting MCP proxy (HTTP/SSE) …")
+        print(f"[Refract] {n} tools loaded. Starting MCP proxy (HTTP/SSE) …", file=sys.stderr)
         await proxy.serve_http()
     else:
-        print(f"[Refract] {n} tools loaded. Starting MCP proxy (stdio) …")
-        print("[Refract] Ready — configure your agent to use this proxy as an MCP server.")
+        print(f"[Refract] {n} tools loaded. Starting MCP proxy (stdio) …", file=sys.stderr)
+        print("[Refract] Ready — configure your agent to use this proxy as an MCP server.", file=sys.stderr)
         await proxy.serve()
 
 
@@ -122,7 +122,7 @@ def main(argv: list[str] | None = None) -> None:
     try:
         asyncio.run(_run(args))
     except KeyboardInterrupt:
-        print("\n[Refract] Proxy stopped.")
+        print("\n[Refract] Proxy stopped.", file=sys.stderr)
     except Exception as exc:
         print(f"[Refract] Fatal error: {exc}", file=sys.stderr)
         sys.exit(1)
