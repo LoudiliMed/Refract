@@ -252,16 +252,14 @@ def test_dispatch_unknown_tool():
 
 # ─── MCP server wiring ────────────────────────────────────────────────────────
 
-def test_server_lists_three_tools(tmp_path):
+def test_server_lists_all_tools(tmp_path):
     pytest.importorskip("mcp")
     server = RefractServer(root=str(tmp_path))
-    mcp_server = server._build_mcp_server()
+    server._build_mcp_server()  # registers handlers without error
 
-    handler = mcp_server.request_handlers
-    # The list_tools handler is registered; exercise it via the decorated coroutine.
     # Pull tool names from the static schema the server advertises.
     names = {t["name"] for t in refract_server._TOOL_SCHEMAS}
-    assert names == {"index_repo", "get_compressed", "expand"}
+    assert names == {"index_repo", "get_compressed", "expand", "blast_radius"}
 
 
 def test_server_call_tool_returns_json_text(tmp_path):

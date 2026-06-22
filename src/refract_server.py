@@ -27,6 +27,7 @@ import json
 import logging
 import os
 import sys
+from collections import deque
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -292,6 +293,82 @@ def expand(file_path: str, targets: list[str], root: str = ".") -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────
+# Tool 4: blast_radius
+# ─────────────────────────────────────────────────────────────────────
+def _risk_level(impacted_count: int) -> str:
+    if impacted_count > 5:
+        return "HIGH"
+    if impacted_count > 2:
+        return "MEDIUM"
+    return "LOW"
+
+
+def blast_radius(file_path: str, target_function: str, root: str = ".") -> dict:
+    """Reverse-call-graph impact analysis for a Python function.
+
+    Builds the call graph from ast_extractor.extract() (top-level functions and
+    class methods alike), inverts the "appels" edges so each function points to
+    the functions that call it, then BFS from *target_function* to find every
+    function transitively affected by changing it.
+
+    Pure graph traversal — zero LLM calls. Python files only.
+    """
+    target_path = _resolve(file_path, root)
+    try:
+        source = _read_source(target_path)
+    except OSError as exc:
+        return {"error": f"read error: {exc}", "file": target_path}
+
+    try:
+        graph = extract(source)
+    except SyntaxError as exc:
+        return {"error": f"syntax error: {exc}", "file": target_path}
+
+    fonctions = graph["fonctions"]
+    names = {f["nom"] for f in fonctions}
+
+    if target_function not in names:
+        return {
+            "error": f"Function '{target_function}' not found in {target_path}",
+            "available_functions": sorted(names),
+            "file": target_path,
+        }
+
+    # Invert the call edges: callee → {callers}. A function F is "called by" C
+    # whenever F appears in C's "appels" list.
+    callers_of: dict[str, set[str]] = {}
+    for fn in fonctions:
+        caller = fn["nom"]
+        for callee in fn["appels"]:
+            callers_of.setdefault(callee, set()).add(caller)
+
+    direct_callers = callers_of.get(target_function, set())
+
+    # BFS upward through the reverse graph to collect the full blast radius.
+    visited = {target_function}
+    queue = deque([target_function])
+    while queue:
+        current = queue.popleft()
+        for caller in callers_of.get(current, ()):  # noqa: SIM118 - set, not dict
+            if caller not in visited:
+                visited.add(caller)
+                queue.append(caller)
+
+    all_impacted = visited - {target_function}
+    impacted_count = len(all_impacted)
+
+    return {
+        "target": target_function,
+        "direct_callers": sorted(direct_callers),
+        "all_impacted": sorted(all_impacted),
+        "impacted_count": impacted_count,
+        "total_functions": len(names),
+        "risk_level": _risk_level(impacted_count),
+        "file": target_path,
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────
 # MCP tool definitions + dispatch
 # ─────────────────────────────────────────────────────────────────────
 _TOOL_SCHEMAS = [
@@ -353,6 +430,29 @@ _TOOL_SCHEMAS = [
             "required": ["file_path", "targets"],
         },
     },
+    {
+        "name": "blast_radius",
+        "description": (
+            "Reverse-call-graph impact analysis for a Python function: BFS over "
+            "inverted call edges to find every function transitively affected by "
+            "changing target_function. Returns direct_callers, all_impacted, "
+            "impacted_count, total_functions and a risk_level. Python files only."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "Path to a .py file (relative to --root or absolute).",
+                },
+                "target_function": {
+                    "type": "string",
+                    "description": "Function/method name to analyze the blast radius of.",
+                },
+            },
+            "required": ["file_path", "target_function"],
+        },
+    },
 ]
 
 
@@ -364,6 +464,8 @@ def dispatch(name: str, arguments: dict, root: str) -> dict:
         return get_compressed(arguments["file_path"], root=root)
     if name == "expand":
         return expand(arguments["file_path"], arguments.get("targets", []), root=root)
+    if name == "blast_radius":
+        return blast_radius(arguments["file_path"], arguments["target_function"], root=root)
     return {"error": f"Unknown tool: {name}"}
 
 
