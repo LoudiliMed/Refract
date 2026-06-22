@@ -41,6 +41,30 @@ _SKIP_DIRS = frozenset({"__pycache__", ".git", "venv", ".venv", "node_modules"})
 # Walk no deeper than this many directory levels below the root.
 _MAX_DEPTH = 3
 
+# Extension → (backend, language). Python uses the stdlib ast extractor;
+# everything else routes to the tree-sitter ts_extractor. (.tsx uses the tsx
+# grammar so embedded JSX parses; it is still the TypeScript family.)
+_EXT_BACKEND: dict[str, tuple[str, str | None]] = {
+    ".py": ("python", None),
+    ".js": ("ts", "javascript"),
+    ".jsx": ("ts", "javascript"),
+    ".mjs": ("ts", "javascript"),
+    ".cjs": ("ts", "javascript"),
+    ".ts": ("ts", "typescript"),
+    ".tsx": ("ts", "tsx"),
+}
+_SUPPORTED_EXTS = frozenset(_EXT_BACKEND)
+
+
+def _detect(file_path: str) -> tuple[str, str | None]:
+    """Return (backend, language) for *file_path* based on its extension.
+
+    Unknown extensions default to the Python backend (callers only ever pass
+    paths already filtered to supported extensions, except direct file tools
+    which then surface a normal parse error)."""
+    ext = os.path.splitext(file_path)[1].lower()
+    return _EXT_BACKEND.get(ext, ("python", None))
+
 
 # ─────────────────────────────────────────────────────────────────────
 # Path handling
@@ -60,8 +84,9 @@ def _read_source(file_path: str) -> str:
 # ─────────────────────────────────────────────────────────────────────
 # Tool 1: index_repo
 # ─────────────────────────────────────────────────────────────────────
-def _iter_py_files(root: str, max_depth: int = _MAX_DEPTH):
-    """Yield .py files under *root*, skipping noise dirs, capped at *max_depth*.
+def _iter_source_files(root: str, max_depth: int = _MAX_DEPTH):
+    """Yield supported source files (.py/.js/.ts/.jsx/.tsx/…) under *root*,
+    skipping noise dirs, capped at *max_depth*.
 
     Depth is measured in directory levels below *root* (root itself = 0).
     """
@@ -75,27 +100,37 @@ def _iter_py_files(root: str, max_depth: int = _MAX_DEPTH):
         # Prune noise dirs in place so os.walk skips them.
         dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS]
         for name in filenames:
-            if name.endswith(".py"):
+            if os.path.splitext(name)[1].lower() in _SUPPORTED_EXTS:
                 yield os.path.join(dirpath, name)
 
 
-def _index_file(source: str) -> dict:
-    """Per-file index: function names, class names, imports."""
-    tree = ast.parse(source)
-    idx = IndexModule(tree)
+def _index_file(source: str, backend: str, language: str | None) -> dict:
+    """Per-file index: function names, class names, imports (language-aware)."""
+    if backend == "python":
+        idx = IndexModule(ast.parse(source))
+        return {
+            "functions": sorted(idx.fonctions),
+            "classes": sorted(idx.classes),
+            "imports": sorted(idx.imports),
+        }
+    import ts_extractor as ts
+    parsed = ts.extract(source, language or "javascript")
     return {
-        "functions": sorted(idx.fonctions),
-        "classes": sorted(idx.classes),
-        "imports": sorted(idx.imports),
+        "functions": sorted({f["nom"] for f in parsed["fonctions"]}),
+        "classes": sorted(parsed["classes"]),
+        "imports": sorted(set(parsed["imports"])),
     }
 
 
 def index_repo(path: str, root: str = ".", max_depth: int = _MAX_DEPTH) -> dict:
-    """Walk a Python repo and return an aggregated structural index.
+    """Walk a repo and return an aggregated structural index.
 
-    Runs the AST extractor on every ``.py`` file (max depth 3, skipping
-    ``__pycache__`` / ``.git`` / ``venv`` / ``node_modules``) and aggregates
-    every function, class, import and external dependency.
+    Runs the right extractor on every supported source file — Python (.py) via
+    the stdlib AST, JavaScript/TypeScript (.js/.jsx/.ts/.tsx/.mjs/.cjs) via
+    tree-sitter — at max depth 3, skipping ``__pycache__`` / ``.git`` /
+    ``venv`` / ``node_modules``, and aggregates every function, class, import
+    and dependency. A file that fails to parse is recorded in ``errors`` and
+    skipped — it never aborts the walk.
     """
     base = _resolve(path, root)
     if not os.path.isdir(base):
@@ -106,15 +141,17 @@ def index_repo(path: str, root: str = ".", max_depth: int = _MAX_DEPTH) -> dict:
     dependencies: set[str] = set()
     n_functions = n_classes = 0
 
-    for fpath in _iter_py_files(base, max_depth):
+    for fpath in _iter_source_files(base, max_depth):
         relname = os.path.relpath(fpath, base)
+        backend, language = _detect(fpath)
         try:
-            info = _index_file(_read_source(fpath))
-        except SyntaxError as exc:
-            errors[relname] = f"syntax error: {exc}"
-            continue
+            info = _index_file(_read_source(fpath), backend, language)
         except OSError as exc:
             errors[relname] = f"read error: {exc}"
+            continue
+        except Exception as exc:  # SyntaxError, tree-sitter missing, parse error
+            logger.warning("index_repo: skipping %s — %s", relname, exc)
+            errors[relname] = f"{type(exc).__name__}: {exc}"
             continue
         files[relname] = info
         dependencies.update(info["imports"])
@@ -141,17 +178,30 @@ def index_repo(path: str, root: str = ".", max_depth: int = _MAX_DEPTH) -> dict:
 # Tool 2: get_compressed
 # ─────────────────────────────────────────────────────────────────────
 def get_compressed(file_path: str, root: str = ".") -> dict:
-    """S5-compress a single ``.py`` file and report token savings."""
+    """S5-compress a single source file and report token savings.
+
+    Language is auto-detected from the extension: Python via the stdlib AST,
+    JS/TS via tree-sitter. Parse / backend failures return an ``error`` dict
+    rather than raising.
+    """
     target = _resolve(file_path, root)
+    backend, language = _detect(target)
     try:
         source = _read_source(target)
     except OSError as exc:
         return {"error": f"read error: {exc}", "file": target}
 
     try:
-        compressed = compress(source)
+        if backend == "python":
+            compressed = compress(source)
+        else:
+            import ts_extractor as ts
+            compressed = ts.compress(source, language or "javascript")
     except SyntaxError as exc:
         return {"error": f"syntax error: {exc}", "file": target}
+    except Exception as exc:  # tree-sitter missing / parse failure
+        logger.warning("get_compressed: %s — %s", target, exc)
+        return {"error": f"{type(exc).__name__}: {exc}", "file": target}
 
     tokens_before = count_tokens(source)
     tokens_after = count_tokens(compressed)
@@ -160,6 +210,7 @@ def get_compressed(file_path: str, root: str = ".") -> dict:
     )
     return {
         "file": target,
+        "language": language or "python",
         "compressed": compressed,
         "tokens_before": tokens_before,
         "tokens_after": tokens_after,
@@ -179,16 +230,31 @@ def _node_source(node: ast.AST, source: str) -> str:
 def expand(file_path: str, targets: list[str], root: str = ".") -> dict:
     """Return named functions/classes verbatim + their dependency context.
 
-    For each name in *targets* found at module level (or as a top-level method
-    inside a class), returns the full source plus the compressed dependency
-    contract (data / type / internal / external) computed against the module
-    vocabulary.
+    For each name in *targets* found at module level (or as a method inside a
+    class), returns the full source plus the compressed dependency contract
+    (data / type / internal / external) computed against the module vocabulary.
+    Language is auto-detected from the extension (Python AST / JS-TS tree-sitter).
     """
     target_path = _resolve(file_path, root)
+    backend, language = _detect(target_path)
     try:
         source = _read_source(target_path)
     except OSError as exc:
         return {"error": f"read error: {exc}", "file": target_path}
+
+    if backend != "python":
+        try:
+            import ts_extractor as ts
+            parsed = ts.expand(source, list(targets), language or "javascript")
+        except Exception as exc:  # tree-sitter missing / parse failure
+            logger.warning("expand: %s — %s", target_path, exc)
+            return {"error": f"{type(exc).__name__}: {exc}", "file": target_path}
+        return {
+            "file": target_path,
+            "targets": parsed["targets"],
+            "missing": parsed["missing"],
+            "context": {"imports": parsed["imports"]},
+        }
 
     try:
         tree = ast.parse(source)
@@ -232,9 +298,9 @@ _TOOL_SCHEMAS = [
     {
         "name": "index_repo",
         "description": (
-            "Walk a Python repo and return an aggregated structural index: "
-            "every function, class, import and external dependency. Max depth 3; "
-            "skips __pycache__, .git, venv, node_modules."
+            "Walk a repo (Python + JavaScript/TypeScript) and return an "
+            "aggregated structural index: every function, class, import and "
+            "dependency. Max depth 3; skips __pycache__, .git, venv, node_modules."
         ),
         "inputSchema": {
             "type": "object",
@@ -250,9 +316,9 @@ _TOOL_SCHEMAS = [
     {
         "name": "get_compressed",
         "description": (
-            "S5-compress a single .py file (signatures + dependency contracts, "
-            "bodies stripped) and return the compressed structure plus token "
-            "stats (tokens_before, tokens_after, reduction_pct)."
+            "S5-compress a single source file — Python or JS/TS (signatures + "
+            "dependency contracts, bodies stripped) — and return the compressed "
+            "structure plus token stats (tokens_before, tokens_after, reduction_pct)."
         ),
         "inputSchema": {
             "type": "object",

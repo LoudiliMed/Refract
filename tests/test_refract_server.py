@@ -22,7 +22,7 @@ import refract_server
 from refract_server import (
     RefractServer,
     _build_parser,
-    _iter_py_files,
+    _iter_source_files,
     dispatch,
     expand,
     get_compressed,
@@ -122,7 +122,7 @@ def test_index_repo_bad_path():
 
 
 def test_iter_py_files_depth_cap(repo):
-    files = list(_iter_py_files(str(repo)))
+    files = list(_iter_source_files(str(repo)))
     names = {os.path.basename(f) for f in files}
     assert "mod_a.py" in names
     assert "mod_b.py" in names
