@@ -162,6 +162,7 @@ Then ask Claude directly:
 - Cursor
 - Any client that follows the MCP (Model Context Protocol) standard
 - Any existing MCP server — your internal tools, GitHub, Google Workspace, Slack, etc.
+- Python, Javascript, typescript, JSX, TSX
 
 ---
 
@@ -212,6 +213,8 @@ Example over 30 days, 100 requests/day, 5,000 tokens of schemas:
 |---|---|
 | Without Refract, without cache | $45.00 |
 | With Refract + cache | $1.49 |
+| sample_app.js (JavaScript) | — | 799 tok | 284 tok | −64.5% |
+| sample_app.ts (TypeScript) | — | 378 tok | 266 tok | −29.6% |
 
 ---
 
