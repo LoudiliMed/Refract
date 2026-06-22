@@ -111,7 +111,51 @@ The `--verbose` flag shows live savings:
 Refract optimizes information retrieval by sending an agent a simple index of tool names instead of a massive summary of all available data. Once the required tool is identified, the system delivers only the necessary full details and automatically verifies that no important content was lost during the compression. Operating completely without artificial intelligence, this streamlined process is entirely automated, fast, and predictable.
 
 ---
+---
 
+## Two modes
+
+### Mode 1 — MCP Proxy (compress external tool schemas)
+
+Sits between your agent and any MCP server. Compresses tool schemas on the fly so your agent doesn't load the full catalogue on every request.
+
+```bash
+refract-proxy --target "npx @modelcontextprotocol/server-filesystem /tmp" --verbose
+```
+
+### Mode 2 — MCP Server (analyse your own Python code)
+
+Exposes your codebase as an MCP server. Your agent can index a repo, get compressed file context, or expand specific functions with their full source and dependencies.
+
+```bash
+refract-server --root /path/to/your/repo
+```
+
+Add it to Claude Desktop:
+
+```json
+{
+  "mcpServers": {
+    "refract-code": {
+      "command": "/path/to/refract-server",
+      "args": ["--root", "/path/to/your/repo"]
+    }
+  }
+}
+```
+
+Then ask Claude directly:
+- *"Index the repo and tell me which file has the most functions"*
+- *"Get the compressed version of src/auth.py and show token reduction"*
+- *"Expand the function authenticate and show its dependencies"*
+
+| Tool | Input | Output |
+|---|---|---|
+| `index_repo` | repo path | aggregated index of all Python files |
+| `get_compressed` | file path | compressed structure + token stats |
+| `expand` | file path + function names | verbatim source + dependency context |
+
+---
 ## Works with
 
 - Claude Desktop
