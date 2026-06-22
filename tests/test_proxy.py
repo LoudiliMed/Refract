@@ -381,4 +381,96 @@ def test_end_to_end_calendar_schemas():
         f"L'index ({idx_tok} tok) doit être plus petit que le brut ({raw_tok} tok)"
     )
     print(f"\n[Calendar] {len(proxy._tools)} tools | {raw_tok} → {idx_tok} tok"
-          f" ({(1 - idx_tok/raw_tok)*100:.0f}% réduction)")
+          f" ({(1 - idx_tok/raw_tok)*100:.0f}% réduction)", file=sys.stderr)
+
+
+# ─── tests stdout propre (protocole MCP stdio) ───────────────────────────────
+
+_VERBOSE_FIXTURE = [
+    {
+        "name": "send_email",
+        "description": "Send an email to a recipient.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "to": {"type": "string", "description": "Recipient address"},
+                "subject": {"type": "string", "description": "Email subject"},
+                "body": {"type": "string", "description": "Email body"},
+            },
+            "required": ["to", "subject", "body"],
+        },
+    },
+    {
+        "name": "list_messages",
+        "description": "List recent email messages.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "max_results": {"type": "integer", "description": "Max messages to return"},
+            },
+        },
+    },
+]
+
+
+@pytest.fixture
+def verbose_proxy(tmp_path) -> RefractProxy:
+    """Proxy verbose pré-chargé avec _VERBOSE_FIXTURE (fichier JSON local)."""
+    schema_file = tmp_path / "verbose_fixture.json"
+    schema_file.write_text(json.dumps(_VERBOSE_FIXTURE), encoding="utf-8")
+    proxy = RefractProxy(target_url=str(schema_file), verbose=True)
+    asyncio.run(proxy.connect())
+    return proxy
+
+
+def test_verbose_connect_does_not_write_to_stdout(tmp_path, capsys):
+    """connect() en mode verbose ne doit rien écrire sur stdout."""
+    schema_file = tmp_path / "fixture.json"
+    schema_file.write_text(json.dumps(_VERBOSE_FIXTURE), encoding="utf-8")
+    proxy = RefractProxy(target_url=str(schema_file), verbose=True)
+    asyncio.run(proxy.connect())
+    captured = capsys.readouterr()
+    assert captured.out == "", "connect() verbose must not write to stdout"
+    assert "[Refract]" in captured.err
+
+
+def test_handle_tools_list_verbose_does_not_write_to_stdout(verbose_proxy, capsys):
+    """handle_tools_list() en mode verbose ne doit rien écrire sur stdout."""
+    verbose_proxy.handle_tools_list()
+    captured = capsys.readouterr()
+    assert captured.out == "", "handle_tools_list() verbose must not write to stdout"
+    assert "[Refract]" in captured.err
+
+
+def test_handle_tool_call_verbose_does_not_write_to_stdout(verbose_proxy, capsys):
+    """handle_tool_call() en mode verbose ne doit rien écrire sur stdout."""
+    asyncio.run(verbose_proxy.handle_tool_call("send_email", {"to": "a@b.com", "subject": "Hi", "body": "Hello"}))
+    captured = capsys.readouterr()
+    assert captured.out == "", "handle_tool_call() verbose must not write to stdout"
+    assert "[Refract]" in captured.err
+
+
+def test_serve_stdio_verbose_does_not_write_to_stdout(verbose_proxy, monkeypatch, capsys):
+    """serve() en mode verbose ne doit rien écrire sur stdout avant de démarrer."""
+    def mock_stdio_server():
+        class _CM:
+            async def __aenter__(self):
+                return (None, None)
+            async def __aexit__(self, *_):
+                pass
+        return _CM()
+
+    import mcp.server.stdio as _stdio_mod
+
+    async def mock_serve_runner(self, read, write, opts):
+        return
+
+    monkeypatch.setattr(_stdio_mod, "stdio_server", mock_stdio_server)
+
+    from mcp.server import Server
+    monkeypatch.setattr(Server, "run", mock_serve_runner)
+
+    asyncio.run(verbose_proxy.serve())
+    captured = capsys.readouterr()
+    assert captured.out == "", "serve() verbose must not write to stdout"
+    assert "[Refract]" in captured.err
