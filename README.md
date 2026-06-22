@@ -25,6 +25,8 @@ It's like asking someone to read the entire store catalogue just to buy bread.
 | Filesystem tools (14 tools) | 1,892 tokens | 236 tokens (**−88%**) |
 | Google Calendar tools (5 tools) | 5,010 tokens | 660 tokens (**−87%**) |
 | Enterprise pack — Calendar + Gmail + Drive (12 tools) | 8,649 tokens | 882 tokens (**−90%**) |
+| sample_app.js (JavaScript) |  799 tok | 284 tok (**−64.5%**) |
+| sample_app.ts (TypeScript) |  378 tok | 266 tok (**−29.6%**) |
 
 Fewer tokens sent = lower API bills, faster responses.
 
@@ -213,11 +215,6 @@ Example over 30 days, 100 requests/day, 5,000 tokens of schemas:
 |---|---|
 | Without Refract, without cache | $45.00 |
 | With Refract + cache | $1.49 |
-
-And for JS and TS the tokens reductions is :
-
-| sample_app.js (JavaScript) | — | 799 tok | 284 tok | −64.5% |
-| sample_app.ts (TypeScript) | — | 378 tok | 266 tok | −29.6% |
 
 ---
 
