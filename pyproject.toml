@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "refract-mcp"
-version = "0.4.0"
+version = "0.5.0"
 description = "MCP proxy that compresses tool schemas — up to -98% tokens, 100% signal preserved"
 readme = "README.md"
 license = {file = "LICENSE"}
