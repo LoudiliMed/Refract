@@ -4,33 +4,23 @@
 
 # Refract
 
-> Cuts up to 97% of the tokens your AI agents spend using MCP tools — without losing anything.
-
----
-
-## The problem in one sentence
-
-When your AI agent (Claude, Cursor...) connects to an external tool — your calendar, your emails, GitHub — it downloads **the full description of every available tool**, every single time, even if it only ends up using one.
-
-It's like asking someone to read the entire store catalogue just to buy bread.
-
-**Refract fixes that.** It sits between your agent and the tool server, and only lets through what's actually needed.
+> Cuts up to 98% of the tokens your AI agents spend using MCP tools — without losing anything.
 
 ---
 
 ## What it actually changes
 
-| | Without Refract | With Refract |
-|---|---|---|
-| Filesystem tools (14 tools) | 1,892 tokens | 236 tokens (**−88%**) |
-| Google Calendar tools (5 tools) | 5,010 tokens | 660 tokens (**−87%**) |
-| Enterprise pack — Calendar + Gmail + Drive (12 tools) | 8,649 tokens | 882 tokens (**−90%**) |
-| sample_app.js (JavaScript) |  799 tok | 284 tok (**−64.5%**) |
-| sample_app.ts (TypeScript) |  378 tok | 266 tok (**−29.6%**) |
+| Server | Tools | Before | After | Reduction |
+|---|---|---|---|---|
+| filesystem (Anthropic) | 14 | 1,892 tok | 236 tok | **−88%** |
+| sequential-thinking | 1 | 926 tok | 20 tok | **−98%** |
+| Google Calendar | 5 | 5,173 tok | 155 tok | **−97%** |
+| Enterprise (Cal + Gmail + Drive) | 12 | 8,649 tok | 882 tok | **−90%** |
+| sample_app.js (JavaScript) | — | 799 tok | 284 tok | **−64.5%** |
+| sample_app.ts (TypeScript) | — | 378 tok | 266 tok | **−29.6%** |
+| ast_extractor.py (Python) | — | 3,600 tok | 868 tok | **−75.9%** |
 
-Fewer tokens sent = lower API bills, faster responses.
-
-**And nothing is lost.** Every check confirmed tools stay 100% usable after compression and no required information is ever stripped.
+Fewer tokens sent = lower API bills, faster responses. And nothing is lost. Every check confirmed tools stay 100% usable after compression.
 
 ---
 
@@ -40,94 +30,45 @@ Fewer tokens sent = lower API bills, faster responses.
 pip install refract-mcp
 ```
 
-That's it. No API key required, no account needed.
-
----
-
-## How to use it
-
-### With Claude Desktop
-
-Open your Claude Desktop config file and add:
-
-```json
-{
-  "mcpServers": {
-    "my-tool-via-refract": {
-      "command": "refract-proxy",
-      "args": [
-        "--target",
-        "npx @modelcontextprotocol/server-filesystem /path/to/folder",
-        "--verbose"
-      ]
-    }
-  }
-}
-```
-
-Replace the `--target` line with any MCP server you already use. Restart Claude Desktop and that's it, Refract runs in the background.
-
-You may have this message when launching Claude Desktop :**"Failed to spawn process: No such file or directory" in Claude Desktop**
-
-This usually means Claude Desktop can't find `refract-proxy` in its PATH. Find the absolute path and use it directly in your config:
+Optional extras:
 
 ```bash
-which refract-proxy
+pip install refract-mcp[semantic]   # semantic tool routing with embeddings
+pip install refract-mcp[multilang]  # JavaScript, TypeScript, JSX, TSX support
 ```
 
-Then use the full path in `claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "my-tool-via-refract": {
-      "command": "/full/path/to/refract-proxy",
-      "args": [
-        "--target",
-        "npx @modelcontextprotocol/server-filesystem /path/to/folder",
-        "--verbose"
-      ]
-    }
-  }
-}
-```
-
----
-### From the command line
-
-```bash
-refract-proxy --target "npx @modelcontextprotocol/server-filesystem /tmp" --verbose
-```
-
-The `--verbose` flag shows live savings:
-
-```
-[Refract] Connected to npx @modelcontextprotocol/server-filesystem /tmp
-  14 tools  |  1892 → 236 tokens  (88% reduction)
-```
-
----
-
-## How it works, no jargon
-
-Refract optimizes information retrieval by sending an agent a simple index of tool names instead of a massive summary of all available data. Once the required tool is identified, the system delivers only the necessary full details and automatically verifies that no important content was lost during the compression. Operating completely without artificial intelligence, this streamlined process is entirely automated, fast, and predictable.
-
----
 ---
 
 ## Two modes
 
-### Mode 1 — MCP Proxy (compress external tool schemas)
+### Mode 1 — MCP Proxy
 
-Sits between your agent and any MCP server. Compresses tool schemas on the fly so your agent doesn't load the full catalogue on every request.
+Sits between your agent and any MCP server. Compresses tool schemas on the fly so your agent does not load the full catalogue on every request.
 
 ```bash
 refract-proxy --target "npx @modelcontextprotocol/server-filesystem /tmp" --verbose
 ```
 
-### Mode 2 — MCP Server (analyse your own Python code)
+Add it to Claude Desktop:
 
-Exposes your codebase as an MCP server. Your agent can index a repo, get compressed file context, or expand specific functions with their full source and dependencies.
+```json
+{
+  "mcpServers": {
+    "my-server-via-refract": {
+      "command": "/path/to/refract-proxy",
+      "args": [
+        "--target",
+        "npx @modelcontextprotocol/server-filesystem /path/to/folder",
+        "--verbose"
+      ]
+    }
+  }
+}
+```
+
+### Mode 2 — MCP Server
+
+Exposes your codebase as an MCP server. Your agent can index a repo, get compressed file context, expand specific functions, analyze impact, detect breaking changes, and map security risks.
 
 ```bash
 refract-server --root /path/to/your/repo
@@ -146,81 +87,176 @@ Add it to Claude Desktop:
 }
 ```
 
-Then ask Claude directly:
-- *"Index the repo and tell me which file has the most functions"*
-- *"Get the compressed version of src/auth.py and show token reduction"*
-- *"Expand the function authenticate and show its dependencies"*
+---
+
+## How it works, no jargon
+
+Imagine a library with 50 books.
+
+Without Refract: your agent gets a detailed summary of all 50 books on every question, even if the answer only needs one of them.
+
+With Refract: your agent first gets a list of titles (the index). Once it knows which book it needs, it only receives that book's content.
+
+Technically:
+
+The index (always sent): just tool names and a short description of each.
+
+The detail (sent only when needed): the full description of the tool actually used, everything required to use it correctly, nothing more.
+
+The verification: after every compression, Refract automatically checks that nothing important was removed. If there is any doubt, it sends the full version instead of taking a risk.
+
+No AI model is involved in this process. It is fully automatic, fast, and deterministic.
+
+---
+
+## MCP Proxy tools
+
+| Tool | What it does |
+|---|---|
+| Compression | Compresses tool schemas on the fly, up to 98% reduction |
+| Signal check | Verifies callable contract after every compression |
+| Semantic routing | Identifies the right tool using embeddings (opt-in) |
+| Prompt caching | Injects Anthropic cache_control for repeated requests |
+
+## MCP Server tools
 
 | Tool | Input | Output |
 |---|---|---|
-| `index_repo` | repo path | aggregated index of all Python files |
-| `get_compressed` | file path | compressed structure + token stats |
-| `expand` | file path + function names | verbatim source + dependency context |
-
----
-## Works with
-
-- Claude Desktop
-- Cursor
-- Any client that follows the MCP (Model Context Protocol) standard
-- Any existing MCP server — your internal tools, GitHub, Google Workspace, Slack, etc.
-- Python, Javascript, typescript, JSX, TSX
+| index_repo | repo path | aggregated index of all Python, JS, TS files |
+| get_compressed | file path | compressed structure + token stats |
+| expand | file path + function names | verbatim source + dependency context |
+| blast_radius | file path + function name | all functions that break if target changes |
+| semantic_diff | file path + old source + new source | breaking changes vs body-only changes |
+| security_surface | repo path | map of dangerous calls (subprocess, eval, pickle, requests) |
 
 ---
 
-## For developers
+## blast_radius
 
-### Python usage
+Ask Claude which functions break if you change a target function.
 
-```python
-from refract_proxy import RefractProxy
+Example result:
 
-proxy = RefractProxy(
-    target_url="npx @modelcontextprotocol/server-filesystem /tmp",
-    verbose=True,
-)
-await proxy.connect()
-
-# Use compressed tools directly with the Anthropic API
-tools = proxy.as_anthropic_tools(use_cache=True)
-
-# Or serve as a local MCP server (stdio)
-await proxy.serve()
-
-# Or expose it via HTTP/SSE
-await proxy.serve_http()  # → http://localhost:8080/sse
+```json
+{
+  "target": "authenticate",
+  "direct_callers": ["login_user"],
+  "all_impacted": ["login_user", "verify_session", "admin_access"],
+  "impacted_count": 3,
+  "risk_level": "MEDIUM"
+}
 ```
 
-### HTTP/SSE mode
+Risk levels: LOW (0 to 2 impacted), MEDIUM (3 to 5), HIGH (6 or more).
 
-```bash
-refract-proxy --target "https://my-mcp-server.com" --mode http --port 8080
+---
+
+## semantic_diff
+
+Detects breaking API changes by comparing function interfaces, not bodies. Use it as a CI gate.
+
+Example result:
+
+```json
+{
+  "breaking": ["authenticate"],
+  "body_only": ["logout"],
+  "added": ["new_function"],
+  "removed": [],
+  "unchanged": ["hash_password"],
+  "is_breaking": true
+}
 ```
 
-### With a local schema file (for testing)
+If is_breaking is true, the PR changes the public API and must be reviewed.
 
-```bash
-refract-proxy --target schemas/mcp_calendar_schemas.json --verbose
+---
+
+## security_surface
+
+Maps every function that calls dangerous primitives across your repo.
+
+HIGH risk: subprocess, os.system, eval, exec, pickle, ctypes
+
+MEDIUM risk: open (write mode), socket, requests, httpx, urllib
+
+Example result:
+
+```json
+{
+  "high_risk": [
+    {
+      "file": "src/llm_client.py",
+      "function": "run_command",
+      "calls": ["subprocess.run"]
+    }
+  ],
+  "summary": {
+    "high_risk_count": 1,
+    "medium_risk_count": 3,
+    "total_functions_scanned": 87,
+    "clean_files": 8
+  }
+}
 ```
+
+---
+
+## Languages supported
+
+Python (via ast module), JavaScript, TypeScript, JSX, TSX (via tree-sitter, opt-in with pip install refract-mcp[multilang]).
+
+Language is auto-detected from file extension. Graceful fallback if tree-sitter is not installed.
 
 ---
 
 ## Built-in Anthropic caching
 
-Refract integrates with [Anthropic prompt caching](https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching): `as_anthropic_tools()` automatically marks the compressed catalogue as cacheable, cutting costs even further on repeated requests.
+Refract integrates with Anthropic prompt caching. as_anthropic_tools() automatically marks the compressed catalogue as cacheable, cutting costs further on repeated requests.
 
-Example over 30 days, 100 requests/day, 5,000 tokens of schemas:
+Example over 30 days, 100 requests per day, 5,000 tokens of schemas:
 
-| | Cost |
+| Scenario | Cost |
 |---|---|
 | Without Refract, without cache | $45.00 |
 | With Refract + cache | $1.49 |
 
 ---
 
+## Troubleshooting
+
+**"Failed to spawn process: No such file or directory" in Claude Desktop**
+
+Claude Desktop cannot find refract-proxy in its PATH. Find the absolute path and use it directly:
+
+```bash
+which refract-proxy
+```
+
+Then use the full path in claude_desktop_config.json:
+
+```json
+{
+  "mcpServers": {
+    "my-tool-via-refract": {
+      "command": "/full/path/to/refract-proxy",
+      "args": [
+        "--target",
+        "npx @modelcontextprotocol/server-filesystem /path/to/folder"
+      ]
+    }
+  }
+}
+```
+
+---
+
+## Works with
+
+Claude Desktop, Cursor, any client that follows the MCP standard, any existing MCP server.
+
+---
+
 ## License
 
 MIT — free to use, including commercially.
-ENDOFREADME
-
-
