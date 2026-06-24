@@ -259,7 +259,13 @@ def test_server_lists_all_tools(tmp_path):
 
     # Pull tool names from the static schema the server advertises.
     names = {t["name"] for t in refract_server._TOOL_SCHEMAS}
-    assert names == {"index_repo", "get_compressed", "expand", "blast_radius"}
+    assert names == {
+        "index_repo",
+        "get_compressed",
+        "expand",
+        "blast_radius",
+        "security_surface",
+    }
 
 
 def test_server_call_tool_returns_json_text(tmp_path):

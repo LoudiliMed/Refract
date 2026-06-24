@@ -32,7 +32,14 @@ from collections import deque
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import ast_extractor
-from ast_extractor import IndexModule, compress, count_tokens, dependances, extract
+from ast_extractor import (
+    IndexModule,
+    compress,
+    count_tokens,
+    dependances,
+    extract,
+    extract_json,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -369,6 +376,192 @@ def blast_radius(file_path: str, target_function: str, root: str = ".") -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────
+# Tool 5: security_surface
+# ─────────────────────────────────────────────────────────────────────
+# HIGH risk: code execution, deserialization, arbitrary import.
+_HIGH_RISK = frozenset({
+    "subprocess", "subprocess.run", "subprocess.Popen", "subprocess.call",
+    "os.system", "os.popen", "os.execv", "os.execve",
+    "eval", "exec", "compile",
+    "pickle.loads", "pickle.load", "pickle.dumps",
+    "__import__", "importlib.import_module",
+    "ctypes",
+})
+
+# MEDIUM risk: network, file write, external data.
+# NOTE: ``open`` is intentionally absent — it is handled separately because
+# only write/append modes count (see _has_write_open).
+_MEDIUM_RISK = frozenset({
+    "socket", "socket.connect", "socket.bind",
+    "requests.get", "requests.post", "requests.put", "requests.delete",
+    "requests.request",
+    "httpx.get", "httpx.post", "httpx.Client",
+    "urllib.request.urlopen", "urllib.urlopen",
+    "paramiko", "ftplib", "smtplib",
+})
+
+# Mode-string characters that turn open() into a write/append operation.
+_OPEN_WRITE_CHARS = ("w", "a", "x", "+")
+
+
+def _matches(call: str, riskset: frozenset[str]) -> bool:
+    """True if a dotted call name matches a risk set.
+
+    Matches either exactly ("subprocess.run") or by root module ("subprocess"),
+    so a bare-module entry like ``subprocess``/``ctypes``/``paramiko`` flags every
+    attribute call on it (``subprocess.run``, ``ctypes.CDLL`` …), while a dotted
+    entry like ``os.system`` only matches that exact call (not all of ``os.*``).
+    """
+    if call in riskset:
+        return True
+    return call.split(".")[0] in riskset
+
+
+def _has_write_open(node: ast.AST) -> bool:
+    """True if *node*'s body calls open() in a write/append mode.
+
+    The mode is the 2nd positional arg or the ``mode=`` keyword. A literal string
+    containing w/a/x/+ is a write. No mode → default ``"r"`` (read-only, skipped).
+    A non-literal mode (a variable) can't be resolved statically, so it is flagged
+    conservatively as a write.
+    """
+    for n in ast.walk(node):
+        if not (
+            isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Name)
+            and n.func.id == "open"
+        ):
+            continue
+        mode = None
+        if len(n.args) >= 2:
+            mode = n.args[1]
+        else:
+            for kw in n.keywords:
+                if kw.arg == "mode":
+                    mode = kw.value
+        if mode is None:
+            continue  # default "r" → read-only, not a risk
+        if isinstance(mode, ast.Constant) and isinstance(mode.value, str):
+            if any(c in mode.value for c in _OPEN_WRITE_CHARS):
+                return True
+        else:
+            return True  # dynamic mode → conservative flag
+    return False
+
+
+def _function_nodes(tree: ast.AST) -> dict:
+    """Map function/method name → its AST node (first occurrence) for line hints."""
+    nodes: dict = {}
+    for n in ast.walk(tree):
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            nodes.setdefault(n.name, n)
+    return nodes
+
+
+def _scan_function(node, appels: list[str]) -> tuple[list[str], list[str]]:
+    """Classify a function's calls into (high_risk_calls, medium_risk_calls)."""
+    high: list[str] = []
+    medium: list[str] = []
+    for call in appels:
+        if call == "open":
+            continue  # mode-dependent, handled below
+        if _matches(call, _HIGH_RISK):
+            high.append(call)
+        elif _matches(call, _MEDIUM_RISK):
+            medium.append(call)
+    if node is not None and "open" in appels and _has_write_open(node):
+        medium.append("open")
+    return high, medium
+
+
+def security_surface(
+    repo_path: str, root: str = ".", max_depth: int = _MAX_DEPTH
+) -> dict:
+    """Find functions that call dangerous primitives across a Python repo.
+
+    Pure AST analysis — zero LLM calls. Walks Python files (max depth 3, same
+    skips as index_repo), and for every function classifies its calls against a
+    HIGH-risk set (code execution / deserialization / arbitrary import) and a
+    MEDIUM-risk set (network / file-write / external data). ``open()`` is flagged
+    medium only when called in a write/append mode (or with an undeterminable
+    mode). A function with a HIGH-risk call is reported in ``high_risk`` only; one
+    with only MEDIUM-risk calls in ``medium_risk``; a file with no risky function
+    lands in ``clean``. Files that fail to parse are skipped and logged to stderr,
+    never aborting the scan.
+    """
+    base = _resolve(repo_path, root)
+    if not os.path.isdir(base):
+        return {"error": f"Not a directory: {base}", "repo_path": base}
+
+    high_risk: list[dict] = []
+    medium_risk: list[dict] = []
+    clean: list[str] = []
+    total_functions = 0
+    total_files = 0
+
+    for fpath in _iter_source_files(base, max_depth):
+        if not fpath.endswith(".py"):  # Python only for now
+            continue
+        relname = os.path.relpath(fpath, base)
+        try:
+            source = _read_source(fpath)
+        except OSError as exc:
+            logger.warning("security_surface: read error %s — %s", relname, exc)
+            continue
+        try:
+            fonctions = extract_json(source)["fonctions"]
+            tree = ast.parse(source)
+        except SyntaxError as exc:
+            logger.warning("security_surface: skipping %s — %s", relname, exc)
+            continue
+        except Exception as exc:  # any other parse failure → skip, never crash
+            logger.warning("security_surface: skipping %s — %s", relname, exc)
+            continue
+
+        total_files += 1
+        node_map = _function_nodes(tree)
+        file_had_risk = False
+
+        for fn in fonctions:
+            total_functions += 1
+            node = node_map.get(fn["nom"])
+            high_calls, medium_calls = _scan_function(node, fn["appels"])
+            line_hint = f"line {node.lineno}" if node is not None else "unknown"
+            if high_calls:
+                high_risk.append({
+                    "file": relname,
+                    "function": fn["nom"],
+                    "calls": high_calls,
+                    "line_hint": line_hint,
+                })
+                file_had_risk = True
+            elif medium_calls:
+                medium_risk.append({
+                    "file": relname,
+                    "function": fn["nom"],
+                    "calls": medium_calls,
+                    "line_hint": line_hint,
+                })
+                file_had_risk = True
+
+        if not file_had_risk:
+            clean.append(relname)
+
+    return {
+        "high_risk": high_risk,
+        "medium_risk": medium_risk,
+        "clean": sorted(clean),
+        "summary": {
+            "high_risk_count": len(high_risk),
+            "medium_risk_count": len(medium_risk),
+            "total_functions_scanned": total_functions,
+            "total_files_scanned": total_files,
+            "clean_files": len(clean),
+        },
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────
 # MCP tool definitions + dispatch
 # ─────────────────────────────────────────────────────────────────────
 _TOOL_SCHEMAS = [
@@ -453,6 +646,27 @@ _TOOL_SCHEMAS = [
             "required": ["file_path", "target_function"],
         },
     },
+    {
+        "name": "security_surface",
+        "description": (
+            "Walk a Python repo and find functions that call dangerous primitives "
+            "— pure AST analysis, zero LLM calls. Classifies calls as HIGH risk "
+            "(subprocess/os.system/eval/exec/pickle/__import__/ctypes …) or MEDIUM "
+            "risk (sockets/requests/httpx/urllib/paramiko/smtplib and write-mode "
+            "open()). Returns high_risk, medium_risk, clean files and a summary. "
+            "Max depth 3; skips __pycache__, .git, venv, node_modules."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "repo_path": {
+                    "type": "string",
+                    "description": "Repo path (relative to --root or absolute).",
+                }
+            },
+            "required": ["repo_path"],
+        },
+    },
 ]
 
 
@@ -466,6 +680,8 @@ def dispatch(name: str, arguments: dict, root: str) -> dict:
         return expand(arguments["file_path"], arguments.get("targets", []), root=root)
     if name == "blast_radius":
         return blast_radius(arguments["file_path"], arguments["target_function"], root=root)
+    if name == "security_surface":
+        return security_surface(arguments["repo_path"], root=root)
     return {"error": f"Unknown tool: {name}"}
 
 
