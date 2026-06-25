@@ -39,6 +39,8 @@ dependencies = [
 [project.scripts]
 refract-proxy = "refract_cli:main"
 refract-server = "refract_server:main"
+refract-install = "refract_install:main"
+refract-server-install = "refract_install:main_server"
 
 [project.optional-dependencies]
 dev = [
