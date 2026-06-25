@@ -45,9 +45,35 @@ pip install refract-mcp[multilang]  # JavaScript, TypeScript, JSX, TSX support
 
 Sits between your agent and any MCP server. Compresses tool schemas on the fly so your agent does not load the full catalogue on every request.
 
+**Local subprocess (stdio):**
+
 ```bash
 refract-proxy --target "npx @modelcontextprotocol/server-filesystem /tmp" --verbose
 ```
+
+**Remote HTTP/SSE server:**
+
+```bash
+# --url implies SSE transport (explicit, recommended for remote endpoints)
+refract-proxy --url https://my-mcp-server.com/sse
+
+# or with --transport flag (auto-detection can be overridden)
+refract-proxy --target https://my-mcp-server.com/sse --transport sse
+```
+
+**Proxy flags:**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--target URL` | required | MCP target: stdio command, HTTP URL, or JSON file |
+| `--stdio-cmd CMD` | — | Alias for `--target` for stdio commands |
+| `--url URL` | — | Remote SSE/HTTP endpoint — implies `--transport sse` |
+| `--transport {stdio,sse}` | auto | Force transport to the target (overrides auto-detection) |
+| `--sse-timeout SECONDS` | 30 | Connection timeout for SSE targets (retries 3×) |
+| `--mode {stdio,http}` | stdio | How the proxy serves your agent |
+| `--port PORT` | 8080 | Proxy listen port in `--mode http` |
+| `--verbose` | off | Print token counts per request |
+| `--log-level` | WARNING | DEBUG / INFO / WARNING / ERROR |
 
 Add it to Claude Desktop:
 
@@ -61,6 +87,19 @@ Add it to Claude Desktop:
         "npx @modelcontextprotocol/server-filesystem /path/to/folder",
         "--verbose"
       ]
+    }
+  }
+}
+```
+
+For a remote MCP server:
+
+```json
+{
+  "mcpServers": {
+    "remote-via-refract": {
+      "command": "/path/to/refract-proxy",
+      "args": ["--url", "https://my-mcp-server.com/sse"]
     }
   }
 }

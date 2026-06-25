@@ -134,18 +134,35 @@ _STDIO_EXECUTABLES = frozenset({
     "npx", "node", "python", "python3", "uvx", "deno", "bun",
 })
 
+# SSE retry config — 3 attempts, 1 s base delay (doubles each retry)
+_SSE_MAX_RETRIES = 3
+_SSE_RETRY_DELAY = 1.0
+
 
 class _TargetClient:
     """Lightweight client to connect to the target MCP server.
 
     Dispatch priority in list_tools / call_tool:
       1. Local JSON file (tests, static catalogue)
-      2. stdio command (npx, python3, uvx…)
-      3. HTTP/SSE (deployed server)
+      2. stdio command (npx, python3, uvx…)  [or forced via transport="stdio"]
+      3. HTTP/SSE (deployed server)            [or forced via transport="sse"]
+
+    Args:
+        target_url: Command, URL, or file path of the target MCP server.
+        transport: Force transport selection — ``"stdio"``, ``"sse"``, or
+            ``None`` (auto-detect, default).
+        timeout: Timeout in seconds passed to ``sse_client`` (default 30).
     """
 
-    def __init__(self, target_url: str):
+    def __init__(
+        self,
+        target_url: str,
+        transport: str | None = None,
+        timeout: float = 30.0,
+    ):
         self.target_url = target_url
+        self._forced_transport = transport
+        self._timeout = timeout
 
     # ── transport detection ─────────────────────────────────────────── #
 
@@ -174,19 +191,38 @@ class _TargetClient:
         url = self.target_url
         return url[7:] if url.startswith("file://") else url
 
+    def _effective_transport(self) -> str:
+        """Returns ``"file"``, ``"stdio"``, or ``"sse"``.
+
+        Forced transport (set in the constructor) takes priority over
+        auto-detection so that callers can explicitly request SSE for a URL
+        that would otherwise be mis-classified (or vice-versa).
+        """
+        if self._forced_transport == "sse":
+            return "sse"
+        if self._forced_transport == "stdio":
+            return "stdio"
+        if self._is_local_file():
+            return "file"
+        if self._is_stdio_cmd():
+            return "stdio"
+        return "sse"
+
     # ── dispatch ────────────────────────────────────────────────────── #
 
     async def list_tools(self) -> list[dict]:
-        if self._is_local_file():
+        t = self._effective_transport()
+        if t == "file":
             return self._load_json_file(self._file_path())
-        if self._is_stdio_cmd():
+        if t == "stdio":
             return await self._stdio_list_tools()
         return await self._sse_list_tools()
 
     async def call_tool(self, name: str, arguments: dict) -> list:
-        if self._is_local_file():
+        t = self._effective_transport()
+        if t == "file":
             return [{"type": "text", "text": f"[Proxy] Simulated call to '{name}' (local target)"}]
-        if self._is_stdio_cmd():
+        if t == "stdio":
             return await self._stdio_call_tool(name, arguments)
         return await self._sse_call_tool(name, arguments)
 
@@ -267,11 +303,26 @@ class _TargetClient:
         except ImportError as exc:
             raise RuntimeError(f"MCP library missing: {exc}. Run `pip install mcp`") from exc
 
-        async with sse_client(self.target_url) as (read, write):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
-                result = await session.list_tools()
-                return [self._tool_to_dict(t) for t in result.tools]
+        last_exc: Exception | None = None
+        for attempt in range(_SSE_MAX_RETRIES):
+            try:
+                async with sse_client(self.target_url, timeout=self._timeout) as (read, write):
+                    async with ClientSession(read, write) as session:
+                        await session.initialize()
+                        result = await session.list_tools()
+                        return [self._tool_to_dict(t) for t in result.tools]
+            except Exception as exc:
+                last_exc = exc
+                logger.warning(
+                    "SSE list_tools error (attempt %d/%d) on %s: %s",
+                    attempt + 1, _SSE_MAX_RETRIES, self.target_url, exc,
+                )
+                if attempt < _SSE_MAX_RETRIES - 1:
+                    await asyncio.sleep(_SSE_RETRY_DELAY * (2 ** attempt))
+        raise RuntimeError(
+            f"SSE connection to {self.target_url!r} failed after "
+            f"{_SSE_MAX_RETRIES} attempts: {last_exc}"
+        ) from last_exc
 
     async def _sse_call_tool(self, name: str, arguments: dict) -> list:
         try:
@@ -280,11 +331,26 @@ class _TargetClient:
         except ImportError as exc:
             raise RuntimeError(f"MCP library missing: {exc}") from exc
 
-        async with sse_client(self.target_url) as (read, write):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
-                result = await session.call_tool(name, arguments)
-                return list(result.content) if result.content else []
+        last_exc: Exception | None = None
+        for attempt in range(_SSE_MAX_RETRIES):
+            try:
+                async with sse_client(self.target_url, timeout=self._timeout) as (read, write):
+                    async with ClientSession(read, write) as session:
+                        await session.initialize()
+                        result = await session.call_tool(name, arguments)
+                        return list(result.content) if result.content else []
+            except Exception as exc:
+                last_exc = exc
+                logger.warning(
+                    "SSE call_tool %r error (attempt %d/%d) on %s: %s",
+                    name, attempt + 1, _SSE_MAX_RETRIES, self.target_url, exc,
+                )
+                if attempt < _SSE_MAX_RETRIES - 1:
+                    await asyncio.sleep(_SSE_RETRY_DELAY * (2 ** attempt))
+        raise RuntimeError(
+            f"SSE call_tool {name!r} on {self.target_url!r} failed after "
+            f"{_SSE_MAX_RETRIES} attempts: {last_exc}"
+        ) from last_exc
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -299,6 +365,8 @@ class RefractProxy:
         port: int = 8080,
         verbose: bool = False,
         use_cache: bool = False,
+        transport: str | None = None,
+        sse_timeout: float = 30.0,
     ):
         self.target_url = target_url
         self.port = port
@@ -309,10 +377,10 @@ class RefractProxy:
         self._index: dict = {}
         self._defs: dict = {}
         self._compressed: dict[str, dict] = {}
-        self._client = _TargetClient(target_url)
+        self._client = _TargetClient(target_url, transport=transport, timeout=sse_timeout)
         # Parsed command if target is a stdio subprocess, otherwise None
         self._cmd_parts: list[str] | None = (
-            target_url.split() if self._client._is_stdio_cmd() else None
+            target_url.split() if self._client._effective_transport() == "stdio" else None
         )
         # Semantic router — lazy-initialized in connect()
         self._router = None

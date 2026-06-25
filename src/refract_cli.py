@@ -6,6 +6,10 @@ Usage:
     refract-proxy --target "npx @modelcontextprotocol/server-filesystem /tmp" --mode stdio
     refract-proxy --stdio-cmd "npx @modelcontextprotocol/server-filesystem /tmp"
 
+    # SSE transport: proxy connects to a remote HTTP/SSE MCP server
+    refract-proxy --url https://my-mcp-server.com/sse --mode stdio
+    refract-proxy --target https://my-mcp-server.com/sse --transport sse
+
     # http mode — agent connects via a network URL (http://localhost:8080/sse)
     refract-proxy --target "https://my-mcp-server.com" --mode http --port 8080
 
@@ -37,7 +41,7 @@ def _build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
-    # --target and --stdio-cmd are two ways to specify the target (mutually exclusive)
+    # --target, --stdio-cmd, and --url specify the target (mutually exclusive)
     target_group = p.add_mutually_exclusive_group(required=True)
     target_group.add_argument(
         "--target",
@@ -45,7 +49,8 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="URL",
         help=(
             "MCP target: HTTP/SSE URL (https://…), JSON file path, "
-            "or stdio command (\"npx @mcp/server /path\")"
+            "or stdio command (\"npx @mcp/server /path\"). "
+            "Transport is auto-detected; use --transport to override."
         ),
     )
     target_group.add_argument(
@@ -57,7 +62,35 @@ def _build_parser() -> argparse.ArgumentParser:
             "Ex: \"npx @modelcontextprotocol/server-filesystem /tmp\""
         ),
     )
+    target_group.add_argument(
+        "--url",
+        dest="url",
+        metavar="URL",
+        help=(
+            "Remote SSE/HTTP MCP endpoint — implies --transport sse. "
+            "Ex: https://my-mcp-server.com/sse"
+        ),
+    )
 
+    p.add_argument(
+        "--transport",
+        choices=["stdio", "sse"],
+        default=None,
+        metavar="{stdio,sse}",
+        help=(
+            "Transport used to connect to the target MCP server. "
+            "Default: auto-detected (http:// URL → sse, command → stdio). "
+            "--url always implies sse."
+        ),
+    )
+    p.add_argument(
+        "--sse-timeout",
+        dest="sse_timeout",
+        type=float,
+        default=30.0,
+        metavar="SECONDS",
+        help="Timeout in seconds for SSE connections (default: 30)",
+    )
     p.add_argument(
         "--port",
         type=int,
@@ -70,8 +103,8 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=["stdio", "http"],
         default="stdio",
         help=(
-            "Proxy transport: stdio (default — local subprocess, "
-            "Claude Desktop/Cursor) or http (SSE network, URL http://localhost:<port>/sse)"
+            "How the proxy serves the agent: stdio (default — Claude Desktop/Cursor) "
+            "or http (SSE network, URL http://localhost:<port>/sse)"
         ),
     )
     p.add_argument(
@@ -91,13 +124,20 @@ def _build_parser() -> argparse.ArgumentParser:
 async def _run(args: argparse.Namespace) -> None:
     from refract_proxy import RefractProxy
 
+    # Resolve target URL and transport from the mutually exclusive group
+    url_flag = getattr(args, "url", None)
+    target = args.target if args.target else url_flag
+    transport = args.transport or ("sse" if url_flag else None)
+
     proxy = RefractProxy(
-        target_url=args.target,
+        target_url=target,
         port=args.port,
         verbose=args.verbose,
+        transport=transport,
+        sse_timeout=args.sse_timeout,
     )
 
-    print(f"[Refract] Connecting to {args.target} …", file=sys.stderr)
+    print(f"[Refract] Connecting to {target} …", file=sys.stderr)
     await proxy.connect()
 
     n = len(proxy._tools)
@@ -113,6 +153,14 @@ async def _run(args: argparse.Namespace) -> None:
 def main(argv: list[str] | None = None) -> None:
     parser = _build_parser()
     args = parser.parse_args(argv)
+
+    # --url implies SSE; reject contradictory --transport stdio
+    url_flag = getattr(args, "url", None)
+    if url_flag and args.transport == "stdio":
+        parser.error(
+            "--url is for SSE endpoints and cannot be combined with --transport stdio. "
+            "Use --target instead of --url if you want stdio transport."
+        )
 
     logging.basicConfig(
         level=getattr(logging, args.log_level),
