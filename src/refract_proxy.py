@@ -139,19 +139,31 @@ _SSE_MAX_RETRIES = 3
 _SSE_RETRY_DELAY = 1.0
 
 
+def _unwrap_exception_group(exc: BaseException) -> BaseException:
+    """Recursively extracts the first leaf exception from an ExceptionGroup.
+
+    ExceptionGroup (Python 3.11+ / anyio) wraps real errors in TaskGroup context.
+    This unwraps them so logs show the actionable cause, not "ExceptionGroup: []".
+    """
+    if hasattr(exc, "exceptions") and exc.exceptions:
+        return _unwrap_exception_group(exc.exceptions[0])
+    return exc
+
+
 class _TargetClient:
     """Lightweight client to connect to the target MCP server.
 
     Dispatch priority in list_tools / call_tool:
       1. Local JSON file (tests, static catalogue)
-      2. stdio command (npx, python3, uvx…)  [or forced via transport="stdio"]
-      3. HTTP/SSE (deployed server)            [or forced via transport="sse"]
+      2. Explicit transport override (transport param): "stdio" | "sse" | "http"
+      3. stdio command (npx, python3, uvx… — auto-detected)
+      4. SSE (deployed server — default for HTTP URLs)
 
     Args:
         target_url: Command, URL, or file path of the target MCP server.
-        transport: Force transport selection — ``"stdio"``, ``"sse"``, or
+        transport: Force transport — ``"stdio"``, ``"sse"``, ``"http"``, or
             ``None`` (auto-detect, default).
-        timeout: Timeout in seconds passed to ``sse_client`` (default 30).
+        timeout: Connection timeout in seconds passed to ``sse_client`` (default 30).
     """
 
     def __init__(
@@ -161,7 +173,7 @@ class _TargetClient:
         timeout: float = 30.0,
     ):
         self.target_url = target_url
-        self._forced_transport = transport
+        self.transport = transport  # "stdio" | "sse" | "http" | None (auto-detect)
         self._timeout = timeout
 
     # ── transport detection ─────────────────────────────────────────── #
@@ -192,18 +204,20 @@ class _TargetClient:
         return url[7:] if url.startswith("file://") else url
 
     def _effective_transport(self) -> str:
-        """Returns ``"file"``, ``"stdio"``, or ``"sse"``.
+        """Returns ``"file"``, ``"stdio"``, ``"sse"``, or ``"http"``.
 
-        Forced transport (set in the constructor) takes priority over
-        auto-detection so that callers can explicitly request SSE for a URL
-        that would otherwise be mis-classified (or vice-versa).
+        Local file always wins: a file path is a file path regardless of any
+        explicit transport hint (you cannot SSE/HTTP-connect to a local JSON file).
+        Explicit transport then takes priority over auto-detection for URLs.
         """
-        if self._forced_transport == "sse":
-            return "sse"
-        if self._forced_transport == "stdio":
-            return "stdio"
         if self._is_local_file():
             return "file"
+        if self.transport == "http":
+            return "http"
+        if self.transport == "sse":
+            return "sse"
+        if self.transport == "stdio":
+            return "stdio"
         if self._is_stdio_cmd():
             return "stdio"
         return "sse"
@@ -214,6 +228,8 @@ class _TargetClient:
         t = self._effective_transport()
         if t == "file":
             return self._load_json_file(self._file_path())
+        if t == "http":
+            return await self._http_list_tools()
         if t == "stdio":
             return await self._stdio_list_tools()
         return await self._sse_list_tools()
@@ -222,6 +238,8 @@ class _TargetClient:
         t = self._effective_transport()
         if t == "file":
             return [{"type": "text", "text": f"[Proxy] Simulated call to '{name}' (local target)"}]
+        if t == "http":
+            return await self._http_call_tool(name, arguments)
         if t == "stdio":
             return await self._stdio_call_tool(name, arguments)
         return await self._sse_call_tool(name, arguments)
@@ -351,6 +369,48 @@ class _TargetClient:
             f"SSE call_tool {name!r} on {self.target_url!r} failed after "
             f"{_SSE_MAX_RETRIES} attempts: {last_exc}"
         ) from last_exc
+
+    # ── Streamable HTTP (MCP spec 2025-03-26) ────────────────────────── #
+
+    async def _http_list_tools(self) -> list[dict]:
+        try:
+            from mcp.client.streamable_http import streamablehttp_client
+            from mcp.client.session import ClientSession
+        except ImportError as exc:
+            raise RuntimeError(f"MCP library missing: {exc}. Run `pip install mcp`") from exc
+
+        try:
+            async with streamablehttp_client(self.target_url) as (read, write, _):
+                async with ClientSession(read, write) as session:
+                    await session.initialize()
+                    result = await session.list_tools()
+                    return [self._tool_to_dict(t) for t in result.tools]
+        except BaseException as exc:
+            real = _unwrap_exception_group(exc)
+            if real is not exc:
+                logger.error("Streamable HTTP transport error: %s", real)
+                raise RuntimeError(f"Streamable HTTP transport error: {real}") from real
+            raise
+
+    async def _http_call_tool(self, name: str, arguments: dict) -> list:
+        try:
+            from mcp.client.streamable_http import streamablehttp_client
+            from mcp.client.session import ClientSession
+        except ImportError as exc:
+            raise RuntimeError(f"MCP library missing: {exc}") from exc
+
+        try:
+            async with streamablehttp_client(self.target_url) as (read, write, _):
+                async with ClientSession(read, write) as session:
+                    await session.initialize()
+                    result = await session.call_tool(name, arguments)
+                    return list(result.content) if result.content else []
+        except BaseException as exc:
+            real = _unwrap_exception_group(exc)
+            if real is not exc:
+                logger.error("Streamable HTTP transport error: %s", real)
+                raise RuntimeError(f"Streamable HTTP transport error: {real}") from real
+            raise
 
 
 # ─────────────────────────────────────────────────────────────────────

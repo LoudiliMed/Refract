@@ -167,13 +167,8 @@ def test_main_url_implies_sse_proxy_instantiation(monkeypatch, tmp_path):
     assert received["target_url"] == "https://example.com/sse"
 
 
-def test_main_transport_sse_passed_to_proxy(monkeypatch, tmp_path):
-    """--transport sse doit être transmis à RefractProxy."""
-    import json
-
-    schema_file = tmp_path / "t.json"
-    schema_file.write_text(json.dumps(FAKE_TOOLS), encoding="utf-8")
-
+def test_main_transport_sse_passed_to_proxy(monkeypatch):
+    """--url implique transport='sse' transmis à RefractProxy."""
     received = {}
 
     import refract_proxy as rp
@@ -196,7 +191,7 @@ def test_main_transport_sse_passed_to_proxy(monkeypatch, tmp_path):
     monkeypatch.setattr(rp.RefractProxy, "connect", mock_connect)
     monkeypatch.setattr(rp.RefractProxy, "serve", mock_serve)
 
-    main(["--target", str(schema_file), "--transport", "sse"])
+    main(["--url", "http://example.com/sse"])
 
     assert received["transport"] == "sse"
 
@@ -424,7 +419,7 @@ def test_compression_identical_regardless_of_transport(tmp_path):
 
 def test_proxy_passes_transport_to_client():
     proxy = RefractProxy("https://example.com/sse", transport="sse")
-    assert proxy._client._forced_transport == "sse"
+    assert proxy._client.transport == "sse"
 
 
 def test_proxy_passes_sse_timeout_to_client():

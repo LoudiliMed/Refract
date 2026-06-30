@@ -6,12 +6,15 @@ Usage:
     refract-proxy --target "npx @modelcontextprotocol/server-filesystem /tmp" --mode stdio
     refract-proxy --stdio-cmd "npx @modelcontextprotocol/server-filesystem /tmp"
 
-    # SSE transport: proxy connects to a remote HTTP/SSE MCP server
+    # SSE transport (legacy, kept for compatibility)
     refract-proxy --url https://my-mcp-server.com/sse --mode stdio
     refract-proxy --target https://my-mcp-server.com/sse --transport sse
 
+    # Streamable HTTP transport (MCP spec 2025-03-26, current standard)
+    refract-proxy --target "https://my-mcp-server.com/mcp" --transport http
+
     # http mode — agent connects via a network URL (http://localhost:8080/sse)
-    refract-proxy --target "https://my-mcp-server.com" --mode http --port 8080
+    refract-proxy --target "https://my-mcp-server.com/mcp" --transport http --mode http --port 8080
 
     # JSON schema file (tests / static catalogue), both modes work
     refract-proxy --target schemas/mcp_calendar_schemas.json --mode http --verbose
@@ -74,12 +77,16 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p.add_argument(
         "--transport",
-        choices=["stdio", "sse"],
+        choices=["stdio", "sse", "http"],
         default=None,
-        metavar="{stdio,sse}",
+        metavar="{stdio,sse,http}",
         help=(
-            "Transport used to connect to the target MCP server. "
-            "Default: auto-detected (http:// URL → sse, command → stdio). "
+            "Client transport used to connect to the target MCP server. "
+            "stdio: subprocess command; "
+            "sse: SSE (legacy, kept for compatibility); "
+            "http: Streamable HTTP (MCP spec 2025-03-26, current standard). "
+            "Auto-detected from --target if omitted. "
+            "Both sse and http require an HTTP(S) URL in --target. "
             "--url always implies sse."
         ),
     )
@@ -121,6 +128,18 @@ def _build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _validate_transport(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """Fail fast if the transport/target combination is invalid."""
+    target = args.target or getattr(args, "url", None)
+    if args.transport in ("sse", "http") and not (
+        target and target.startswith("http")
+    ):
+        parser.error(
+            f"--transport {args.transport} requires --target with an HTTP(S) URL "
+            f"(got: {target!r})"
+        )
+
+
 async def _run(args: argparse.Namespace) -> None:
     from refract_proxy import RefractProxy
 
@@ -153,6 +172,7 @@ async def _run(args: argparse.Namespace) -> None:
 def main(argv: list[str] | None = None) -> None:
     parser = _build_parser()
     args = parser.parse_args(argv)
+    _validate_transport(parser, args)
 
     # --url implies SSE; reject contradictory --transport stdio
     url_flag = getattr(args, "url", None)

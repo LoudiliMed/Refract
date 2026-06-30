@@ -92,7 +92,7 @@ Add it to Claude Desktop:
 }
 ```
 
-For a remote MCP server:
+For a remote MCP server (SSE):
 
 ```json
 {
@@ -103,6 +103,28 @@ For a remote MCP server:
     }
   }
 }
+```
+
+#### Transports supported by refract-proxy
+
+| Flag | Value | Description |
+|---|---|---|
+| `--transport http` | Streamable HTTP | **Current standard** (MCP spec 2025-03-26). Use with remote MCP servers. |
+| `--transport sse` | SSE | Legacy transport, kept for compatibility. Use if the server does not support Streamable HTTP. |
+| `--transport stdio` | stdio subprocess | Local command (default when `--target` is a command). |
+| *(omit)* | auto-detect | Inferred from `--target`: HTTP URL → SSE, command → stdio. |
+
+Both `sse` and `http` require an HTTP(S) URL in `--target`.
+
+```bash
+# Connect to a remote MCP server via Streamable HTTP (recommended)
+refract-proxy --target "https://my-mcp-server.com/mcp" --transport http
+
+# Connect via SSE (legacy)
+refract-proxy --target "https://my-mcp-server.com/sse" --transport sse
+
+# Local subprocess (auto-detected, --transport stdio optional)
+refract-proxy --target "npx @modelcontextprotocol/server-filesystem /tmp"
 ```
 
 ### Mode 2 — MCP Server
